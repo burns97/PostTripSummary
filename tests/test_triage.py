@@ -43,6 +43,10 @@ def test_select_representatives_returns_photos():
 
 
 def test_estimate_batch_cost():
-    cost = estimate_batch_cost(num_images=100)
-    assert cost > 0
-    assert isinstance(cost, float)
+    """With no provider, cost is 0. With a provider, delegates to it."""
+    assert estimate_batch_cost(num_images=100) == 0.0
+
+    from unittest.mock import MagicMock
+    mock_provider = MagicMock()
+    mock_provider.estimate_cost.return_value = 1.5
+    assert estimate_batch_cost(num_images=100, provider=mock_provider) == 1.5

@@ -23,9 +23,28 @@ pip install -e .
 - [ExifTool](https://exiftool.org/) must be installed and on your PATH (used for photo metadata extraction)
 - [WeasyPrint](https://doc.courtbouillon.org/weasyprint/stable/first_steps.html) requires system libraries for PDF generation — see their docs for platform-specific instructions
 
-### API key
+### Vision provider setup
 
-The enrichment stage uses Claude's vision API to describe photos. Get an API key from [console.anthropic.com](https://console.anthropic.com/) and set it as an environment variable:
+The enrichment stage uses an AI vision API to describe photos and identify landmarks. Two providers are supported: **Google Gemini** (default, free tier) and **Claude** (paid).
+
+#### Google Gemini (default)
+
+1. Go to [Google AI Studio](https://aistudio.google.com/apikey) and create an API key
+2. Set it as an environment variable or in the settings file:
+
+```bash
+# macOS / Linux
+export GOOGLE_API_KEY=AIza...
+
+# Windows (PowerShell)
+$env:GOOGLE_API_KEY = "AIza..."
+```
+
+Gemini Flash is free for moderate usage, so the pipeline will show "Free" at the cost gate.
+
+#### Claude (alternative)
+
+To use Claude's vision API instead, get an API key from [console.anthropic.com](https://console.anthropic.com/) and configure it:
 
 ```bash
 # macOS / Linux
@@ -34,6 +53,25 @@ export ANTHROPIC_API_KEY=sk-ant-...
 # Windows (PowerShell)
 $env:ANTHROPIC_API_KEY = "sk-ant-..."
 ```
+
+Then switch the provider in settings (see below).
+
+#### Settings file
+
+Global settings live at `~/.post-trip-summary/settings.toml`. Run `post-trip-summary config` to view or edit. The file is auto-created on first use with these defaults:
+
+```toml
+[vision]
+provider = "gemini"           # "gemini" or "claude"
+
+gemini_api_key = ""           # or set GOOGLE_API_KEY env var
+gemini_model = "gemini-2.0-flash"
+
+claude_api_key = ""           # or set ANTHROPIC_API_KEY env var
+claude_model = "claude-sonnet-4-20250514"
+```
+
+API keys can be set either in this file or via environment variables. Environment variables are used as a fallback when the settings file value is empty.
 
 The pipeline will show a cost estimate and ask for approval before making any API calls.
 
@@ -71,7 +109,7 @@ The pipeline runs in stages, saving progress after each step so you can resume a
 | **Ingest** | Reads photos (EXIF/GPS), Excel itineraries, credit card CSVs, Google Maps timeline, Apple Health, and Day One journals |
 | **Skeleton** | Clusters events by time and location into a day-by-day trip structure |
 | **Review skeleton** | Interactive review to fix event names, merge/split/reorder events |
-| **Enrich** | Uses Claude's vision API to describe photos and identify landmarks (with cost estimation and approval) |
+| **Enrich** | Uses AI vision (Gemini or Claude) to describe photos and identify landmarks (with cost estimation and approval) |
 | **Review details** | Final interactive review of descriptions and details |
 | **Generate** | Produces output files: detailed HTML record, shareable PDF, blog post, and a route map |
 
@@ -100,6 +138,7 @@ post-trip-summary add-input <slug> ...    Add data sources to a session
 post-trip-summary resume <slug>           Resume pipeline from last stage
 post-trip-summary preview <slug>          Preview trip in browser (FastAPI)
 post-trip-summary generate <slug>         Generate final output files
+post-trip-summary config                 View/edit global settings
 post-trip-summary delete <slug>           Delete a session
 ```
 
@@ -109,6 +148,7 @@ post-trip-summary delete <slug>           Delete a session
 src/post_trip_summary/
 ├── cli.py                  # Click CLI entry point
 ├── config.py               # Session management
+├── settings.py             # Global settings (vision provider, API keys)
 ├── models.py               # Core data models (Trip, Day, Event, Photo, etc.)
 ├── serialization.py        # JSON serialization/deserialization
 ├── geo/                    # Geo clustering and reverse geocoding
@@ -118,7 +158,7 @@ src/post_trip_summary/
 │   ├── review_skeleton.py  # Interactive skeleton review
 │   ├── review_details.py   # Interactive detail review
 │   └── enrich.py           # Vision API enrichment with cost gate
-├── vision/                 # Claude vision API client and prompts
+├── vision/                 # Vision providers (Gemini, Claude) and prompts
 ├── output/                 # Output generators (HTML, PDF, blog, photo prep)
 ├── preview/                # FastAPI preview server
 └── templates/              # Jinja2 HTML templates

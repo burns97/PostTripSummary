@@ -44,11 +44,13 @@ def test_enrich_applies_vision_results():
 
     mock_result = VisionResult(description="The Eiffel Tower", landmark="Eiffel Tower", confidence="high")
 
-    with patch("post_trip_summary.pipeline.enrich.VisionClient") as MockClient, \
-         patch("post_trip_summary.pipeline.enrich._read_image", return_value=(b"fakedata", "image/jpeg")):
-        instance = MockClient.return_value
-        instance.analyze.return_value = mock_result
-        instance.estimate_cost.return_value = 0.01
+    mock_provider = MagicMock()
+    mock_provider.analyze.return_value = mock_result
+    mock_provider.estimate_cost.return_value = 0.0
 
-        enriched = enrich_trip(trip, api_key="test", auto_approve=True)
+    with patch("post_trip_summary.pipeline.enrich.get_vision_settings", return_value={"provider": "gemini", "api_key": "test", "model": "gemini-2.0-flash"}), \
+         patch("post_trip_summary.pipeline.enrich.create_provider", return_value=mock_provider), \
+         patch("post_trip_summary.pipeline.enrich._read_image", return_value=(b"fakedata", "image/jpeg")):
+
+        enriched = enrich_trip(trip, auto_approve=True)
         assert enriched.days[0].events[0].description == "The Eiffel Tower"

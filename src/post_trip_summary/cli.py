@@ -123,6 +123,19 @@ def resume(slug: str, base_dir: Path | None):
     click.echo(f"Run 'post-trip-summary preview {slug}' to preview, or 'post-trip-summary generate {slug}' to create outputs.")
 
 
+@cli.command()
+def config():
+    """View and edit global settings."""
+    from post_trip_summary.settings import load_settings, ensure_settings_file, SETTINGS_FILE
+    settings_path = ensure_settings_file()
+    settings = load_settings()
+    click.echo(f"Settings file: {settings_path}")
+    click.echo(f"Vision provider: {settings['vision']['provider']}")
+    click.echo(f"Vision model: {settings['vision'].get(settings['vision']['provider'] + '_model', 'default')}")
+    if click.confirm("Open settings file for editing?", default=False):
+        click.edit(filename=str(settings_path))
+
+
 @cli.command("add-input")
 @click.argument("slug")
 @click.option("--photos", type=click.Path(exists=True, path_type=Path))

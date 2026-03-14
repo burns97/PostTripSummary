@@ -4,7 +4,8 @@ import click
 from pathlib import Path
 
 from post_trip_summary.models import Trip, Photo
-from post_trip_summary.vision.client import VisionClient
+from post_trip_summary.settings import get_vision_settings
+from post_trip_summary.vision.client import create_provider
 from post_trip_summary.vision.triage import plan_enrichment, estimate_batch_cost
 
 
@@ -38,8 +39,12 @@ def _read_image(path: Path) -> tuple[bytes, str]:
     return path.read_bytes(), media_type
 
 
-def enrich_trip(trip: Trip, api_key: str | None = None, auto_approve: bool = False) -> Trip:
+def enrich_trip(trip: Trip, auto_approve: bool = False) -> Trip:
     """Run vision analysis on representative photos and update events."""
+    # Load vision settings and create provider
+    vs = get_vision_settings()
+    provider = create_provider(vs["provider"], api_key=vs.get("api_key"), model=vs.get("model"))
+
     # Collect all events with photos
     all_events = [event for day in trip.days for event in day.events if event.photos]
 
@@ -52,10 +57,14 @@ def enrich_trip(trip: Trip, api_key: str | None = None, auto_approve: bool = Fal
         return trip
 
     # Cost gate
-    estimated_cost = estimate_batch_cost(total_images)
+    estimated_cost = estimate_batch_cost(total_images, provider)
     click.echo("\n=== Vision Enrichment ===")
+    click.echo(f"Provider: {vs['provider']} ({vs['model']})")
     click.echo(f"Photos to analyze: {total_images} across {len(enrichment_plan)} events")
-    click.echo(f"Estimated cost: ${estimated_cost:.2f}")
+    if estimated_cost == 0.0:
+        click.echo("Estimated cost: Free (Gemini Flash free tier)")
+    else:
+        click.echo(f"Estimated cost: ${estimated_cost:.2f}")
 
     if not auto_approve:
         choice = click.prompt(
@@ -72,12 +81,13 @@ def enrich_trip(trip: Trip, api_key: str | None = None, auto_approve: bool = Fal
             click.echo("Reducing to most uncertain events only.")
             enrichment_plan = [p for p in enrichment_plan if p["purpose"] != "scene"]
             total_images = sum(len(item["photos"]) for item in enrichment_plan)
-            new_cost = estimate_batch_cost(total_images)
-            click.echo(f"Reduced to {total_images} images. New estimate: ${new_cost:.2f}")
+            new_cost = estimate_batch_cost(total_images, provider)
+            if new_cost == 0.0:
+                click.echo(f"Reduced to {total_images} images. Cost: Free")
+            else:
+                click.echo(f"Reduced to {total_images} images. New estimate: ${new_cost:.2f}")
 
     # Run analysis
-    client = VisionClient(api_key=api_key)
-
     for item in enrichment_plan:
         event = item["event"]
         photos = item["photos"]
@@ -89,7 +99,7 @@ def enrich_trip(trip: Trip, api_key: str | None = None, auto_approve: bool = Fal
         for photo in photos:
             try:
                 image_data, media_type = _read_image(photo.path)
-                result = client.analyze(image_data, media_type, purpose)
+                result = provider.analyze(image_data, media_type, purpose)
                 photo.ai_description = result.description
                 if result.landmark and not best_landmark:
                     best_landmark = result.landmark

@@ -3,7 +3,7 @@
 from pathlib import Path
 
 from post_trip_summary.models import Photo, Event
-from post_trip_summary.vision.client import VisionClient
+from post_trip_summary.vision.client import VisionProvider
 
 
 def is_confidently_identified(event: Event) -> bool:
@@ -52,10 +52,11 @@ def select_representatives(photos: list[Photo], max_count: int = 5) -> list[Phot
     return selected
 
 
-def estimate_batch_cost(num_images: int) -> float:
+def estimate_batch_cost(num_images: int, provider: VisionProvider | None = None) -> float:
     """Estimate cost for analyzing a batch of images."""
-    client = VisionClient.__new__(VisionClient)
-    return client.estimate_cost(num_images)
+    if provider is None:
+        return 0.0
+    return provider.estimate_cost(num_images)
 
 
 def plan_enrichment(events: list[Event], max_per_event: int = 5) -> list[dict]:

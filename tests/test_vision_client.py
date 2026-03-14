@@ -1,7 +1,8 @@
 # tests/test_vision_client.py
-from pathlib import Path
 from unittest.mock import patch, MagicMock
-from post_trip_summary.vision.client import VisionClient, VisionResult
+from post_trip_summary.vision.client import (
+    ClaudeProvider, VisionClient, VisionResult, VisionProvider, create_provider,
+)
 
 
 def test_vision_result_creation():
@@ -10,25 +11,61 @@ def test_vision_result_creation():
     assert result.text_found is None
 
 
-def test_vision_client_analyze_mock():
+def test_claude_provider_analyze_mock():
     """Test that analyze calls the API with correct structure."""
-    with patch("post_trip_summary.vision.client.anthropic") as mock_anthropic:
-        mock_client = MagicMock()
-        mock_anthropic.Anthropic.return_value = mock_client
-        mock_response = MagicMock()
-        mock_response.content = [MagicMock(text='{"description": "Eiffel Tower", "landmark": "Eiffel Tower", "text_found": null}')]
-        mock_client.messages.create.return_value = mock_response
+    mock_anthropic = MagicMock()
+    mock_client = MagicMock()
+    mock_anthropic.Anthropic.return_value = mock_client
+    mock_response = MagicMock()
+    mock_response.content = [MagicMock(text='{"description": "Eiffel Tower", "landmark": "Eiffel Tower", "text_found": null}')]
+    mock_client.messages.create.return_value = mock_response
 
-        client = VisionClient(api_key="test-key")
-        # Create a tiny valid JPEG for testing
-        import struct
+    with patch.dict("sys.modules", {"anthropic": mock_anthropic}):
+        provider = ClaudeProvider(api_key="test-key")
         jpeg_bytes = b'\xff\xd8\xff\xe0' + b'\x00' * 100 + b'\xff\xd9'
-        result = client.analyze(image_data=jpeg_bytes, media_type="image/jpeg", purpose="landmark")
+        result = provider.analyze(image_data=jpeg_bytes, media_type="image/jpeg", purpose="landmark")
         assert mock_client.messages.create.called
 
 
-def test_estimate_cost():
-    client = VisionClient.__new__(VisionClient)
-    cost = client.estimate_cost(num_images=100, avg_tokens_per_image=1500)
+def test_claude_estimate_cost():
+    provider = ClaudeProvider.__new__(ClaudeProvider)
+    cost = provider.estimate_cost(num_images=100, avg_tokens_per_image=1500)
     assert cost > 0
     assert isinstance(cost, float)
+
+
+def test_backward_compat_alias():
+    """VisionClient is an alias for ClaudeProvider."""
+    assert VisionClient is ClaudeProvider
+
+
+def test_create_provider_claude():
+    """Factory returns ClaudeProvider for 'claude'."""
+    mock_anthropic = MagicMock()
+    with patch.dict("sys.modules", {"anthropic": mock_anthropic}):
+        provider = create_provider("claude", api_key="test")
+    assert isinstance(provider, ClaudeProvider)
+    assert isinstance(provider, VisionProvider)
+
+
+def test_create_provider_gemini():
+    """Factory returns GeminiProvider for 'gemini'."""
+    mock_google = MagicMock()
+    mock_genai = MagicMock()
+    with patch.dict("sys.modules", {"google": mock_google, "google.genai": mock_genai}):
+        # Need to clear cached module to force reimport
+        import sys
+        sys.modules.pop("post_trip_summary.vision.gemini", None)
+        provider = create_provider("gemini", api_key="test")
+        from post_trip_summary.vision.gemini import GeminiProvider
+        assert isinstance(provider, GeminiProvider)
+        assert isinstance(provider, VisionProvider)
+
+
+def test_create_provider_unknown():
+    """Factory raises ValueError for unknown provider."""
+    try:
+        create_provider("openai")
+        assert False, "Should have raised ValueError"
+    except ValueError as e:
+        assert "Unknown vision provider" in str(e)
