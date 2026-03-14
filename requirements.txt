@@ -1,0 +1,15 @@
+click>=8.1
+Pillow>=10.0
+pillow-heif>=0.13
+PyExifTool>=0.5
+imagehash>=4.3
+reverse_geocoder>=1.5
+geopy>=2.4
+openpyxl>=3.1
+anthropic>=0.40
+weasyprint>=62.0
+Jinja2>=3.1
+fastapi>=0.115
+uvicorn>=0.32
+staticmap>=0.5
+pytest>=8.0
