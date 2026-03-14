@@ -1,0 +1,18 @@
+<!-- src/post_trip_summary/templates/blog_post.html -->
+<h1>{{ trip.name }}</h1>
+<p><em>{{ trip.date_range[0].strftime('%B %d') }} - {{ trip.date_range[1].strftime('%B %d, %Y') }}</em></p>
+
+{% for event in highlights %}
+<h2>{{ event.name }}</h2>
+<p>{{ event.time_range[0].strftime('%A, %B %d') }}</p>
+{% if event.photos %}
+{% set hl = event.photos | selectattr('is_highlight') | first %}
+{% if hl %}
+<p><img src="photos/{{ hl.path.name }}" alt="{{ event.name }}" style="max-width:100%;"></p>
+{% endif %}
+{% endif %}
+<p>{{ event.description }}</p>
+{% if event.notes %}
+<blockquote>{{ event.notes }}</blockquote>
+{% endif %}
+{% endfor %}

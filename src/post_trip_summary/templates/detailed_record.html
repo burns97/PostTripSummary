@@ -1,0 +1,78 @@
+<!-- src/post_trip_summary/templates/detailed_record.html -->
+{% extends "base.html" %}
+{% block title %}{{ trip.name }} - Detailed Record{% endblock %}
+
+{% block content %}
+<div class="trip-header">
+    <h1>{{ trip.name }}</h1>
+    <p class="dates">{{ trip.date_range[0].strftime('%B %d') }} - {{ trip.date_range[1].strftime('%B %d, %Y') }}</p>
+</div>
+
+{% for day in trip.days %}
+{% if day.events %}
+<div class="day-section">
+    <h2>Day {{ loop.index }}: {{ day.date.strftime('%A, %B %d') }}</h2>
+
+    {% for event in day.events %}
+    <div class="event {{ event.type }}">
+        <div class="event-header">
+            <h3>{{ event.name }}</h3>
+            <span class="event-time">{{ event.time_range[0] | ftime }} - {{ event.time_range[1] | ftime }}</span>
+        </div>
+        {% if event.description %}
+        <p>{{ event.description }}</p>
+        {% endif %}
+        {% if event.notes %}
+        <div class="event-notes">{{ event.notes }}</div>
+        {% endif %}
+        {% set highlights = event.photos | selectattr('is_highlight') | list %}
+        {% if highlights %}
+        <div class="event-photos">
+            {% for photo in highlights %}
+            <img src="photos/{{ photo.path.name }}" alt="{{ photo.ai_description or event.name }}" title="{{ photo.ai_description or '' }}">
+            {% endfor %}
+        </div>
+        {% endif %}
+        <div class="event-sources">Sources: {{ event.sources | join(', ') }}</div>
+    </div>
+    {% endfor %}
+</div>
+{% endif %}
+{% endfor %}
+
+{% if trip.accommodations %}
+<div class="accommodations">
+    <h2>Accommodations</h2>
+    {% for acc in trip.accommodations %}
+    <div class="accommodation">
+        <strong>{{ acc.name }}</strong> - {{ acc.location.city }}, {{ acc.location.country }}<br>
+        {{ acc.check_in.strftime('%b %d') }} to {{ acc.check_out.strftime('%b %d, %Y') }}
+        {% if acc.location.address %}<br>{{ acc.location.address }}{% endif %}
+    </div>
+    {% endfor %}
+</div>
+{% endif %}
+
+{% if trip.expenses %}
+<div class="expense-summary">
+    <h2>Expenses</h2>
+    <table>
+        <thead><tr><th>Date</th><th>Merchant</th><th>Category</th><th>Amount</th></tr></thead>
+        <tbody>
+        {% for exp in trip.expenses | sort(attribute='date') %}
+        <tr>
+            <td>{{ exp.date.strftime('%b %d') }}</td>
+            <td>{{ exp.merchant }}</td>
+            <td>{{ exp.category or '-' }}</td>
+            <td>{{ exp.currency }} {{ '%.2f' | format(exp.amount) }}</td>
+        </tr>
+        {% endfor %}
+        <tr style="font-weight:bold; border-top: 2px solid #333;">
+            <td colspan="3">Total</td>
+            <td>{{ trip.expenses[0].currency if trip.expenses else '' }} {{ '%.2f' | format(trip.expenses | sum(attribute='amount')) }}</td>
+        </tr>
+        </tbody>
+    </table>
+</div>
+{% endif %}
+{% endblock %}

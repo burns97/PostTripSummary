@@ -1,0 +1,56 @@
+<!-- src/post_trip_summary/templates/shareable_summary.html -->
+{% extends "base.html" %}
+{% block title %}{{ trip.name }}{% endblock %}
+{% block extra_css %}
+@media print { .page-break { page-break-before: always; } }
+body { max-width: 800px; }
+.hero { text-align: center; margin: 2em 0; }
+.hero img { max-width: 100%; max-height: 400px; border-radius: 8px; }
+.highlight { margin: 1.5em 0; display: flex; gap: 1em; align-items: flex-start; }
+.highlight img { max-width: 300px; border-radius: 4px; flex-shrink: 0; }
+.highlight-text { flex: 1; }
+.stats { display: flex; flex-wrap: wrap; gap: 1em; justify-content: center; margin: 2em 0; }
+.stat { text-align: center; padding: 1em; background: #f8f9fa; border-radius: 8px; min-width: 120px; }
+.stat-number { font-size: 2em; font-weight: bold; color: #2c3e50; }
+.stat-label { font-size: 0.9em; color: #666; }
+{% endblock %}
+
+{% block content %}
+<div class="trip-header">
+    <h1>{{ trip.name }}</h1>
+    <p class="dates">{{ trip.date_range[0].strftime('%B %d') }} - {{ trip.date_range[1].strftime('%B %d, %Y') }}</p>
+</div>
+
+{% if map_image %}
+<div class="hero">
+    <img src="{{ map_image }}" alt="Trip route">
+</div>
+{% endif %}
+
+<h2>Highlights</h2>
+{% for event in highlights %}
+<div class="highlight">
+    {% if event.photos %}
+    {% set hl = event.photos | selectattr('is_highlight') | first %}
+    {% if hl %}
+    <img src="photos/{{ hl.path.name }}" alt="{{ event.name }}">
+    {% endif %}
+    {% endif %}
+    <div class="highlight-text">
+        <h3>{{ event.name }}</h3>
+        <p class="event-time">{{ event.time_range[0].strftime('%A, %B %d') }} - {{ event.time_range[0] | ftime }}</p>
+        <p>{{ event.description }}</p>
+    </div>
+</div>
+{% endfor %}
+
+<div class="page-break"></div>
+<h2>By the Numbers</h2>
+<div class="stats">
+    <div class="stat"><div class="stat-number">{{ stats.days }}</div><div class="stat-label">Days</div></div>
+    <div class="stat"><div class="stat-number">{{ stats.events }}</div><div class="stat-label">Stops</div></div>
+    <div class="stat"><div class="stat-number">{{ stats.photos }}</div><div class="stat-label">Photos</div></div>
+    {% if stats.countries > 1 %}<div class="stat"><div class="stat-number">{{ stats.countries }}</div><div class="stat-label">Countries</div></div>{% endif %}
+    {% if stats.cities > 1 %}<div class="stat"><div class="stat-number">{{ stats.cities }}</div><div class="stat-label">Cities</div></div>{% endif %}
+</div>
+{% endblock %}
