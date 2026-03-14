@@ -7,6 +7,14 @@ Generate rich trip summaries from vacation photos and travel data. Feed in your 
 Requires Python 3.10+.
 
 ```bash
+python -m venv .venv
+
+# Activate the virtual environment
+# Windows (PowerShell)
+.venv\Scripts\Activate.ps1
+# macOS / Linux
+source .venv/bin/activate
+
 pip install -e .
 ```
 
@@ -14,6 +22,20 @@ pip install -e .
 
 - [ExifTool](https://exiftool.org/) must be installed and on your PATH (used for photo metadata extraction)
 - [WeasyPrint](https://doc.courtbouillon.org/weasyprint/stable/first_steps.html) requires system libraries for PDF generation — see their docs for platform-specific instructions
+
+### API key
+
+The enrichment stage uses Claude's vision API to describe photos. Get an API key from [console.anthropic.com](https://console.anthropic.com/) and set it as an environment variable:
+
+```bash
+# macOS / Linux
+export ANTHROPIC_API_KEY=sk-ant-...
+
+# Windows (PowerShell)
+$env:ANTHROPIC_API_KEY = "sk-ant-..."
+```
+
+The pipeline will show a cost estimate and ask for approval before making any API calls.
 
 ## Quick start
 

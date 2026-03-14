@@ -7,7 +7,8 @@ from geopy.distance import geodesic
 from post_trip_summary.models import (
     Trip, Day, Event, Photo, Location, Accommodation, Transit, Expense,
 )
-from post_trip_summary.geo.clustering import build_clusters
+from post_trip_summary.geo.clustering import build_clusters, merge_nearby_clusters, detect_and_collapse_transit
+from post_trip_summary.geo.interpolate import interpolate_missing_gps
 from post_trip_summary.geo.reverse_geocode import reverse_geocode
 
 
@@ -104,8 +105,13 @@ def build_skeleton(
     health_workouts = trip_data.get("apple_health", [])
     dayone_entries = trip_data.get("dayone", [])
 
-    # Cluster photos
+    # Interpolate GPS for photos missing coordinates before clustering
+    interpolate_missing_gps(photos)
+
+    # Cluster photos, then merge nearby and detect transit
     clusters = build_clusters(photos, gap_minutes, distance_meters)
+    clusters = merge_nearby_clusters(clusters)
+    clusters = detect_and_collapse_transit(clusters)
 
     # Determine date range
     all_dates = set()
@@ -157,6 +163,10 @@ def build_skeleton(
         event_type = "unknown"
         name = ""
 
+        # Transit clusters detected by driving-day heuristic
+        if cluster.get("transit_hint"):
+            event_type = "transit"
+
         if google_match:
             name = google_match.get("name", "")
             sources.append("google_maps")
@@ -177,20 +187,34 @@ def build_skeleton(
         # Build location
         if centroid:
             geo = reverse_geocode(centroid[0], centroid[1])
+            place_name = geo.get("place_name", "") or geo.get("city", "")
             location = Location(
                 lat=centroid[0], lon=centroid[1],
-                name=name or geo.get("city", ""),
+                name=name or place_name,
                 address=None,
                 city=geo.get("city", ""),
                 country=geo.get("country", ""),
             )
         else:
+            place_name = ""
             location = Location(lat=0, lon=0, name=name, address=None, city="", country="")
+
+        # For transit clusters, build a "City A to City B" name from endpoints
+        if cluster.get("transit_hint") and not name:
+            first_photo = cluster["photos"][0]
+            last_photo = cluster["photos"][-1]
+            if first_photo.gps and last_photo.gps:
+                start_geo = reverse_geocode(first_photo.gps[0], first_photo.gps[1])
+                end_geo = reverse_geocode(last_photo.gps[0], last_photo.gps[1])
+                start_place = start_geo.get("place_name", "") or start_geo.get("city", "")
+                end_place = end_geo.get("place_name", "") or end_geo.get("city", "")
+                if start_place and end_place and start_place != end_place:
+                    name = f"{start_place} to {end_place}"
 
         event = Event(
             id="",
             type=event_type,
-            name=name or location.city or "Unknown",
+            name=name or place_name or "Unknown",
             time_range=cluster["time_range"],
             location=location,
             photos=cluster["photos"],

@@ -2,3 +2,5 @@
 __pycache__/
 *.pyc
 .superpowers/
+exiftool.exe
+exiftool_files/*

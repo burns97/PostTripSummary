@@ -55,7 +55,7 @@ def enrich_trip(trip: Trip, api_key: str | None = None, auto_approve: bool = Fal
     estimated_cost = estimate_batch_cost(total_images)
     click.echo("\n=== Vision Enrichment ===")
     click.echo(f"Photos to analyze: {total_images} across {len(enrichment_plan)} events")
-    click.echo(f"Estimated cost: ${estimated_cost:.4f}")
+    click.echo(f"Estimated cost: ${estimated_cost:.2f}")
 
     if not auto_approve:
         choice = click.prompt(
@@ -73,7 +73,7 @@ def enrich_trip(trip: Trip, api_key: str | None = None, auto_approve: bool = Fal
             enrichment_plan = [p for p in enrichment_plan if p["purpose"] != "scene"]
             total_images = sum(len(item["photos"]) for item in enrichment_plan)
             new_cost = estimate_batch_cost(total_images)
-            click.echo(f"Reduced to {total_images} images. New estimate: ${new_cost:.4f}")
+            click.echo(f"Reduced to {total_images} images. New estimate: ${new_cost:.2f}")
 
     # Run analysis
     client = VisionClient(api_key=api_key)
