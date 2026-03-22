@@ -1,14 +1,54 @@
 """Compute stage runners for the wizard server."""
+import logging
+import time
 from pathlib import Path
 
 from post_trip_summary.config import SessionConfig
 from post_trip_summary.serialization import save_trip
 
+logger = logging.getLogger("post_trip_summary.compute")
+
+
+def _logging_callback(inner_callback=None):
+    """Wrap a progress callback to also log to console."""
+    last_phase = [None]
+    phase_start = [time.time()]
+
+    def _cb(phase, current, total, label=""):
+        if phase != last_phase[0]:
+            if last_phase[0] is not None:
+                elapsed = time.time() - phase_start[0]
+                logger.info("  Phase '%s' completed in %.1fs", last_phase[0], elapsed)
+            last_phase[0] = phase
+            phase_start[0] = time.time()
+            logger.info("Phase: %s", phase)
+
+        if total > 0:
+            logger.debug("  [%d/%d] %s", current, total, label)
+        elif label:
+            logger.debug("  %s", label)
+
+        if inner_callback:
+            inner_callback(phase, current, total, label)
+
+    return _cb
+
 
 def run_ingest_pipeline(session: SessionConfig, progress_callback=None):
     """Run full ingest + skeleton pipeline with progress reporting."""
-    trip_data = _run_ingest(session, progress_callback)
-    trip = _run_skeleton(session, trip_data, progress_callback)
+    start_time = time.time()
+    logger.info("=== Starting ingest pipeline for '%s' ===", session.name)
+    cb = _logging_callback(progress_callback)
+
+    trip_data = _run_ingest(session, cb)
+    logger.info("Ingest complete: %d photos, %d accommodations, %d expenses",
+                len(trip_data["photos"]), len(trip_data["accommodations"]),
+                len(trip_data["expenses"]))
+
+    trip = _run_skeleton(session, trip_data, cb)
+    total_events = sum(len(d.events) for d in trip.days)
+    logger.info("Skeleton complete: %d days, %d events", len(trip.days), total_events)
+
     save_trip(trip, session.stage_file("ingested"))
 
     # Also save raw trip_data for debugging
@@ -17,6 +57,8 @@ def run_ingest_pipeline(session: SessionConfig, progress_callback=None):
     raw_path = session.session_dir / "trip_data.json"
     raw_path.write_text(json.dumps(trip_data, default=encode_value, indent=2))
 
+    elapsed = time.time() - start_time
+    logger.info("=== Pipeline complete in %.1fs ===", elapsed)
     return trip
 
 
@@ -83,6 +125,24 @@ def _run_ingest(session, progress_callback=None):
                             f"Culled {culled} low-quality photos")
 
     return trip_data
+
+
+def run_enrich_pipeline(session: SessionConfig, mode: str = "full", progress_callback=None):
+    """Run enrichment pipeline with progress reporting."""
+    start_time = time.time()
+    logger.info("=== Starting enrichment (mode=%s) ===", mode)
+    cb = _logging_callback(progress_callback)
+
+    from post_trip_summary.serialization import load_trip
+    trip = load_trip(session.stage_file("reviewed"))
+
+    from post_trip_summary.pipeline.enrich import enrich_trip_headless
+    trip = enrich_trip_headless(trip, mode=mode, progress_callback=cb)
+
+    save_trip(trip, session.stage_file("enriched"))
+    elapsed = time.time() - start_time
+    logger.info("=== Enrichment complete in %.1fs ===", elapsed)
+    return trip
 
 
 def _run_skeleton(session, trip_data, progress_callback=None):

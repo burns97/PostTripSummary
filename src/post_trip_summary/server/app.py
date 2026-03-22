@@ -206,36 +206,95 @@ def create_app(session: SessionConfig) -> FastAPI:
                         return Response(content=app.state.thumb_cache[cache_key], media_type="image/jpeg")
         raise HTTPException(404, f"Photo not found: {filename}")
 
+    @app.get("/api/enrich/estimate")
+    def enrich_estimate():
+        if app.state.trip is None:
+            raise HTTPException(404, "No trip loaded")
+        from post_trip_summary.vision.triage import plan_enrichment, estimate_batch_cost
+        from post_trip_summary.vision.client import create_provider as _create_provider
+        vs = get_vision_settings()
+        all_events = [e for d in app.state.trip.days for e in d.events if e.photos]
+        plan = plan_enrichment(all_events)
+        total = sum(len(item["photos"]) for item in plan)
+        reduced_plan = [p for p in plan if p["purpose"] != "scene"]
+        reduced_total = sum(len(item["photos"]) for item in reduced_plan)
+        cost = 0.0
+        if vs.get("api_key"):
+            try:
+                provider = _create_provider(
+                    vs["provider"], api_key=vs.get("api_key"), model=vs.get("model")
+                )
+                cost = estimate_batch_cost(total, provider)
+            except Exception:
+                pass
+        return JSONResponse({
+            "provider": vs.get("provider", "gemini"),
+            "model": vs.get("model", ""),
+            "total_images": total,
+            "reduced_images": reduced_total,
+            "estimated_cost": cost,
+            "has_api_key": bool(vs.get("api_key")),
+            "event_count": len(plan),
+        })
+
     @app.post("/api/stage/start")
     async def start_stage(request: Request):
         body = await request.json()
         stage = body.get("stage")
-        if stage != "ingest":
-            raise HTTPException(400, f"Unknown stage: {stage}")
 
         # Reject if a task is already running
         if app.state.background_task is not None and not app.state.background_task.done():
             return JSONResponse({"status": "already_running"}, status_code=409)
 
-        tracker = ProgressTracker()
-        app.state.progress = tracker
+        if stage == "ingest":
+            tracker = ProgressTracker()
+            app.state.progress = tracker
 
-        async def _run():
-            try:
-                from post_trip_summary.server.compute import run_ingest_pipeline
-                trip = await asyncio.to_thread(
-                    run_ingest_pipeline, app.state.session, tracker.callback()
-                )
-                app.state.trip = trip
-                app.state.event_index = _build_event_index(trip)
-                app.state.session.current_stage = "ingested"
-                app.state.session.save()
-                tracker.complete("review")
-            except Exception as e:
-                tracker.fail(str(e))
+            async def _run_ingest():
+                try:
+                    from post_trip_summary.server.compute import run_ingest_pipeline
+                    trip = await asyncio.to_thread(
+                        run_ingest_pipeline, app.state.session, tracker.callback()
+                    )
+                    app.state.trip = trip
+                    app.state.event_index = _build_event_index(trip)
+                    app.state.session.current_stage = "ingested"
+                    app.state.session.save()
+                    tracker.complete("review")
+                except Exception as e:
+                    tracker.fail(str(e))
+                finally:
+                    app.state.background_task = None
 
-        app.state.background_task = asyncio.create_task(_run())
-        return JSONResponse({"status": "started"})
+            app.state.background_task = asyncio.create_task(_run_ingest())
+            return JSONResponse({"status": "started"})
+
+        elif stage == "enrich":
+            mode = body.get("mode", "full")
+            tracker = ProgressTracker()
+            app.state.progress = tracker
+
+            async def _run_enrich():
+                try:
+                    from post_trip_summary.server.compute import run_enrich_pipeline
+                    trip = await asyncio.to_thread(
+                        run_enrich_pipeline, app.state.session, mode, tracker.callback()
+                    )
+                    app.state.trip = trip
+                    app.state.event_index = _build_event_index(trip)
+                    app.state.session.current_stage = "enriched"
+                    app.state.session.save()
+                    tracker.complete("highlights")
+                except Exception as e:
+                    tracker.fail(str(e))
+                finally:
+                    app.state.background_task = None
+
+            app.state.background_task = asyncio.create_task(_run_enrich())
+            return JSONResponse({"status": "started"})
+
+        else:
+            raise HTTPException(400, f"Unknown stage: {stage}")
 
     @app.get("/api/progress")
     async def progress_stream():
@@ -297,10 +356,13 @@ def create_app(session: SessionConfig) -> FastAPI:
         if trip is None or day_index >= len(trip.days):
             raise HTTPException(404, "Day not found")
         day = trip.days[day_index]
+        new_name = body.get("new_name", "").strip()
         try:
             merged = merge_events(day, event_ids)
         except ValueError as e:
             raise HTTPException(400, str(e))
+        if new_name:
+            merged.name = new_name
         _rebuild_index()
         _save_trip()
         return JSONResponse({"merged_event": _serialize_event(merged)})
@@ -467,8 +529,22 @@ def create_app(session: SessionConfig) -> FastAPI:
         template = env.get_template("review.html")
         return HTMLResponse(template.render(**ctx))
 
+    @app.get("/wizard/enrich", response_class=HTMLResponse)
+    def wizard_enrich():
+        if app.state.trip is None:
+            return RedirectResponse("/wizard/setup", status_code=307)
+        # If already enriched, redirect forward
+        if app.state.session.current_stage not in ("reviewed", "enriched"):
+            step = STAGE_TO_STEP.get(app.state.session.current_stage, "setup")
+            if step not in ("enrich", "highlights", "generate"):
+                return RedirectResponse(f"/wizard/{step}", status_code=307)
+        ctx = _get_wizard_context(app.state.session)
+        ctx["stage_title"] = "Vision Enrichment"
+        template = env.get_template("enrich.html")
+        return HTMLResponse(template.render(**ctx))
+
     # Placeholder routes for remaining wizard steps
-    for step_name in ["enrich", "highlights", "generate"]:
+    for step_name in ["highlights", "generate"]:
         _register_placeholder_step(app, env, step_name)
 
     return app
