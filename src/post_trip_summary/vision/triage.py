@@ -67,15 +67,16 @@ def plan_enrichment(events: list[Event], max_per_event: int = 5) -> list[dict]:
     """
     plan = []
     for event in events:
-        if not event.photos:
+        kept_photos = [p for p in event.photos if p.is_kept]
+        if not kept_photos:
             continue
 
         if is_confidently_identified(event):
             # Already identified -- just get a scene description for 1 photo
-            reps = select_representatives(event.photos, max_count=1)
+            reps = select_representatives(kept_photos, max_count=1)
             plan.append({"event": event, "photos": reps, "purpose": "scene"})
         else:
-            reps = select_representatives(event.photos, max_count=max_per_event)
+            reps = select_representatives(kept_photos, max_count=max_per_event)
             plan.append({"event": event, "photos": reps, "purpose": "landmark"})
 
     return plan

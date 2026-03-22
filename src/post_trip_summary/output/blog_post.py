@@ -9,7 +9,9 @@ from post_trip_summary.output.shareable_pdf import select_highlights
 
 def generate_blog_post(trip: Trip, output_path: Path) -> None:
     """Render a blog-friendly HTML file."""
+    from post_trip_summary.output.detailed_record import _photo_url_filter
     env = Environment(loader=PackageLoader("post_trip_summary", "templates"))
+    env.filters["photo_url"] = _photo_url_filter
     template = env.get_template("blog_post.html")
     highlights = select_highlights(trip)
     html = template.render(trip=trip, highlights=highlights)

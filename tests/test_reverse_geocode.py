@@ -28,6 +28,8 @@ def test_build_geo_result_city_present():
     addr = {"city": "Auckland", "state": "Auckland Region", "country_code": "nz"}
     result = _build_geo_result(addr)
     assert result["city"] == "Auckland"
+    assert result["poi_name"] == ""
+    assert result["area_name"] == "Auckland"
     assert result["place_name"] == "Auckland"
     assert result["country"] == "NZ"
 
@@ -44,6 +46,7 @@ def test_build_geo_result_tourism():
     addr = {"tourism": "Hobbiton Movie Set", "state": "Waikato", "country_code": "nz"}
     result = _build_geo_result(addr)
     assert result["tourism"] == "Hobbiton Movie Set"
+    assert result["poi_name"] == "Hobbiton Movie Set"
     assert result["place_name"] == "Hobbiton Movie Set"
 
 
@@ -60,10 +63,36 @@ def test_build_geo_result_suburb_fallback():
     assert result["place_name"] == "Ponsonby"
 
 
+def test_build_geo_result_poi_over_city():
+    """When both city and a POI field exist, poi_name wins for place_name."""
+    addr = {"city": "Hamilton", "tourism": "Hamilton Gardens", "state": "Waikato", "country_code": "nz"}
+    result = _build_geo_result(addr)
+    assert result["poi_name"] == "Hamilton Gardens"
+    assert result["area_name"] == "Hamilton"
+    assert result["place_name"] == "Hamilton Gardens"
+
+
+def test_build_geo_result_amenity():
+    addr = {"amenity": "Auckland Airport", "city": "Auckland", "country_code": "nz"}
+    result = _build_geo_result(addr)
+    assert result["poi_name"] == "Auckland Airport"
+    assert result["amenity"] == "Auckland Airport"
+    assert result["area_name"] == "Auckland"
+
+
+def test_build_geo_result_shop():
+    addr = {"shop": "Countdown", "suburb": "Ponsonby", "city": "Auckland", "country_code": "nz"}
+    result = _build_geo_result(addr)
+    assert result["poi_name"] == "Countdown"
+    assert result["shop"] == "Countdown"
+
+
 def test_build_geo_result_empty():
     result = _build_geo_result({})
     assert result["city"] == ""
     assert result["country"] == ""
     assert result["place_name"] == ""
+    assert result["poi_name"] == ""
+    assert result["area_name"] == ""
     assert result["tourism"] == ""
     assert result["natural"] == ""

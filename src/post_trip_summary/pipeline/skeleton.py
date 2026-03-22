@@ -27,18 +27,41 @@ def _match_cluster_to_itinerary(
     for acc in accommodations:
         if acc.location.lat == 0.0 and acc.location.lon == 0.0:
             continue
-        if acc.check_in <= cluster_date <= acc.check_out:
+        if acc.check_in.date() <= cluster_date <= acc.check_out.date():
             dist = geodesic(centroid, (acc.location.lat, acc.location.lon)).meters
             if dist < 500:
                 return {"name": acc.name, "type": "hotel", "source": "itinerary", "location": acc.location}
 
-    # Check activities
+    # Check activities — require city match, not just date
+    cluster_city = cluster.get("reverse_geo", {}).get("city", "")
+    candidates = []
     for act in activities:
         act_date = date.fromisoformat(act["date"]) if isinstance(act["date"], str) else act["date"]
-        if act_date == cluster_date:
-            return {"name": act["name"], "type": "activity", "source": "itinerary"}
+        if act_date != cluster_date:
+            continue
+        act_city = act.get("city", "")
+        act_type = act.get("type", "activity")
+        candidate = {"name": act["name"], "type": act_type, "source": "itinerary", "city": act_city}
+        # If cluster has a city and activity has a city, only include if they match
+        if cluster_city and act_city:
+            if cluster_city.lower() == act_city.lower():
+                candidates.append(candidate)
+        elif not act_city:
+            # Activity has no city — include as weak candidate
+            candidates.append(candidate)
+        elif not cluster_city:
+            # Cluster has no city — include all date-matched activities
+            candidates.append(candidate)
 
-    return None
+    if not candidates:
+        return None
+    if len(candidates) == 1:
+        return candidates[0]
+    # Multiple candidates — prefer city match, then first
+    for c in candidates:
+        if c["city"] and cluster_city and cluster_city.lower() == c["city"].lower():
+            return c
+    return candidates[0]
 
 
 def _match_cluster_to_expense(cluster: dict, expenses: list[Expense]) -> Expense | None:
@@ -119,8 +142,8 @@ def build_skeleton(
         all_dates.add(c["time_range"][0].date())
         all_dates.add(c["time_range"][1].date())
     for acc in accommodations:
-        d = acc.check_in
-        while d <= acc.check_out:
+        d = acc.check_in.date()
+        while d <= acc.check_out.date():
             all_dates.add(d)
             d += timedelta(days=1)
 
@@ -136,10 +159,22 @@ def build_skeleton(
         c_date = cluster["time_range"][0].date()
         centroid = cluster["centroid"]
 
+        # Pre-compute reverse geocode so city-aware matching can use it
+        if centroid:
+            geo = reverse_geocode(centroid[0], centroid[1])
+            cluster["reverse_geo"] = geo
+        else:
+            geo = {}
+            cluster["reverse_geo"] = geo
+
         # Cross-reference
         itinerary_match = _match_cluster_to_itinerary(cluster, accommodations, activities)
         expense_match = _match_cluster_to_expense(cluster, expenses)
         google_match = _match_cluster_to_google_maps(cluster, place_visits)
+
+        # Mark expense as consumed so it doesn't match other clusters
+        if expense_match:
+            expense_match.event_id = "pending"
 
         # Determine name and type
         sources = ["exif"]
@@ -167,26 +202,40 @@ def build_skeleton(
         if cluster.get("transit_hint"):
             event_type = "transit"
 
+        # Photos-first name resolution:
+        # 1. Google Maps is high-confidence (GPS + time verified) — it wins
+        # 2. Reverse geocode found a specific POI — use it
+        # 3. Itinerary matched by city+date — use only if geocode had no specific POI
+        # 4. Day One entry name
+        # 5. Fall back to area name from geocode
+        geo_poi = geo.get("poi_name", "")
+        geo_area = geo.get("area_name", "") or geo.get("city", "")
+
         if google_match:
             name = google_match.get("name", "")
             sources.append("google_maps")
+        elif geo_poi:
+            name = geo_poi
+        elif itinerary_match:
+            name = itinerary_match.get("name", "")
+        elif dayone_name:
+            name = dayone_name
+        else:
+            name = geo_area
+
+        # Itinerary still provides event_type regardless of name source
         if itinerary_match:
-            name = name or itinerary_match.get("name", "")
             event_type = itinerary_match.get("type", "unknown")
             sources.append("itinerary")
+
+        # Expenses NEVER set the name — only contribute type classification
         if expense_match:
-            if not name:
-                name = expense_match.merchant
             if event_type == "unknown":
                 event_type = _classify_event(expense_category=expense_match.category)
             sources.append("credit_card")
 
-        if event_type == "unknown":
-            event_type = _classify_event(itinerary_match, expense_match.category if expense_match else None, google_match)
-
-        # Build location
+        # Build location (reuse pre-computed reverse_geo)
         if centroid:
-            geo = reverse_geocode(centroid[0], centroid[1])
             place_name = geo.get("place_name", "") or geo.get("city", "")
             location = Location(
                 lat=centroid[0], lon=centroid[1],
@@ -241,6 +290,34 @@ def build_skeleton(
             sources=transit.sources,
         )
         events_by_date[t_date].append(transit_event)
+
+    # Add accommodation check-in/check-out events
+    for acc in accommodations:
+        checkin_event = Event(
+            id="",
+            type="hotel",
+            name=f"Check in: {acc.name}",
+            time_range=(acc.check_in, acc.check_in),
+            location=acc.location,
+            photos=[],
+            description="",
+            notes="",
+            sources=acc.sources,
+        )
+        events_by_date[acc.check_in.date()].append(checkin_event)
+
+        checkout_event = Event(
+            id="",
+            type="hotel",
+            name=f"Check out: {acc.name}",
+            time_range=(acc.check_out, acc.check_out),
+            location=acc.location,
+            photos=[],
+            description="",
+            notes="",
+            sources=acc.sources,
+        )
+        events_by_date[acc.check_out.date()].append(checkout_event)
 
     # Build days
     days = []

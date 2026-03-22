@@ -16,7 +16,7 @@ def _make_sample_trip() -> Trip:
     dep_loc = Location(lat=49.0, lon=2.5, name="CDG", address=None, city="Paris", country="France")
     arr_loc = Location(lat=48.8, lon=2.3, name="Hotel", address="123 Rue", city="Paris", country="France")
     transit = Transit(mode="taxi", departure=TransitPoint(location=dep_loc, time=datetime(2026, 3, 5, 14, 0), name="CDG T2"), arrival=TransitPoint(location=arr_loc, time=datetime(2026, 3, 5, 15, 0), name="Hotel"), details={"cost": 55}, sources=["itinerary"])
-    accom = Accommodation(name="Hotel Le Marais", location=arr_loc, check_in=date(2026, 3, 5), check_out=date(2026, 3, 8), sources=["itinerary"])
+    accom = Accommodation(name="Hotel Le Marais", location=arr_loc, check_in=datetime(2026, 3, 5, 15, 0), check_out=datetime(2026, 3, 8, 11, 0), sources=["itinerary"])
     expense = Expense(date=date(2026, 3, 5), amount=87.5, currency="EUR", merchant="REST LE PETIT", category="dining", event_id="day01-event04", source="credit_card")
     return Trip(name="Paris 2026", date_range=(date(2026, 3, 5), date(2026, 3, 12)), days=[day], accommodations=[accom], transits=[transit], expenses=[expense])
 

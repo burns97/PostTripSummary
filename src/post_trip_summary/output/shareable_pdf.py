@@ -43,9 +43,10 @@ def select_highlights(trip: Trip, max_count: int = 10) -> list[Event]:
 
 def generate_shareable_pdf(trip: Trip, output_path: Path, map_image: str | None = None) -> None:
     """Render the shareable summary and convert to PDF."""
-    from post_trip_summary.output.detailed_record import _format_time_filter
+    from post_trip_summary.output.detailed_record import _format_time_filter, _photo_url_filter
     env = Environment(loader=PackageLoader("post_trip_summary", "templates"))
     env.filters["ftime"] = _format_time_filter
+    env.filters["photo_url"] = _photo_url_filter
     template = env.get_template("shareable_summary.html")
 
     highlights = select_highlights(trip)

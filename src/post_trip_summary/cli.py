@@ -1,11 +1,22 @@
 # src/post_trip_summary/cli.py
 """CLI entry point for Post-Trip Summary."""
+import time
+
 import click
 from pathlib import Path
 
 from post_trip_summary.config import (
     create_session, load_session, list_sessions, delete_session, DEFAULT_BASE_DIR,
 )
+
+
+def _fmt_duration(seconds: float) -> str:
+    """Format seconds as 'Xm Ys' or 'Ys' if under a minute."""
+    if seconds < 60:
+        return f"{seconds:.1f}s"
+    minutes = int(seconds // 60)
+    secs = seconds % 60
+    return f"{minutes}m {secs:.1f}s"
 
 
 @click.group()
@@ -17,14 +28,21 @@ def cli():
 
 @cli.command()
 @click.argument("name")
+@click.option("--photos", type=click.Path(exists=True, path_type=Path), help="Path to photos directory")
+@click.option("--excel", type=click.Path(exists=True, path_type=Path), help="Path to itinerary Excel file")
 @click.option("--base-dir", type=click.Path(path_type=Path), default=None, hidden=True)
-def new(name: str, base_dir: Path | None):
+def new(name: str, photos: Path | None, excel: Path | None, base_dir: Path | None):
     """Create a new trip session."""
     base = base_dir or DEFAULT_BASE_DIR
     session = create_session(name, base_dir=base)
     click.echo(f"Created session '{session.name}' ({session.slug})")
-    photos_path = click.prompt("Where are your photos?", type=str)
-    session.inputs["photos"] = photos_path
+    if not photos:
+        photos = Path(click.prompt("Where are your photos?", type=str))
+    session.inputs["photos"] = str(photos)
+    click.echo(f"  Photos: {photos}")
+    if excel:
+        session.inputs["excel"] = str(excel)
+        click.echo(f"  Excel: {excel}")
     session.save()
     click.echo(f"Session saved. Run 'post-trip-summary resume {session.slug}' to continue.")
 
@@ -53,10 +71,16 @@ def delete(slug: str, base_dir: Path | None):
         click.echo(f"Deleted session '{slug}'.")
 
 
+STAGE_ORDER = ["new", "ingest", "skeleton", "skeleton_reviewed", "enriched", "final", "generated"]
+
+
 @cli.command()
 @click.argument("slug")
+@click.option("--from", "from_stage", type=click.Choice(
+    ["ingest", "skeleton", "skeleton_reviewed", "enriched"],
+), default=None, help="Restart from this stage (e.g. --from skeleton to rebuild skeleton).")
 @click.option("--base-dir", type=click.Path(path_type=Path), default=None, hidden=True)
-def resume(slug: str, base_dir: Path | None):
+def resume(slug: str, from_stage: str | None, base_dir: Path | None):
     """Resume a trip session from where you left off."""
     base = base_dir or DEFAULT_BASE_DIR
     try:
@@ -65,6 +89,16 @@ def resume(slug: str, base_dir: Path | None):
         click.echo(f"Error: Session '{slug}' not found.")
         raise SystemExit(1)
 
+    if from_stage:
+        current_idx = STAGE_ORDER.index(session.current_stage) if session.current_stage in STAGE_ORDER else 0
+        target_idx = STAGE_ORDER.index(from_stage)
+        if target_idx > current_idx:
+            click.echo(f"Cannot skip forward to '{from_stage}' (current: {session.current_stage}).")
+            raise SystemExit(1)
+        session.current_stage = from_stage
+        session.save()
+        click.echo(f"Restarting from '{from_stage}'.")
+
     click.echo(f"Resuming '{session.name}' at stage: {session.current_stage}")
 
     from post_trip_summary.serialization import save_trip, load_trip
@@ -72,13 +106,16 @@ def resume(slug: str, base_dir: Path | None):
     # Stage 1: Ingest
     if session.current_stage in ("new", "ingest"):
         click.echo("\n=== Stage 1: Ingesting data ===")
+        t0 = time.perf_counter()
         trip_data = _run_ingest(session)
         session.current_stage = "ingest"
         session.save()
+        click.echo(f"  Ingest completed in {_fmt_duration(time.perf_counter() - t0)}")
 
     # Stage 2: Build skeleton
     if session.current_stage == "ingest":
         click.echo("\n=== Stage 2: Building trip skeleton ===")
+        t0 = time.perf_counter()
         from post_trip_summary.pipeline.skeleton import build_skeleton
         trip_data = _load_trip_data(session)
         trip = build_skeleton(
@@ -90,25 +127,75 @@ def resume(slug: str, base_dir: Path | None):
         save_trip(trip, session.stage_file("skeleton"))
         session.current_stage = "skeleton"
         session.save()
-        click.echo(f"Skeleton built: {sum(len(d.events) for d in trip.days)} events across {len(trip.days)} days")
+        elapsed = time.perf_counter() - t0
+        click.echo(f"Skeleton built: {sum(len(d.events) for d in trip.days)} events across {len(trip.days)} days ({_fmt_duration(elapsed)})")
 
     # Stage 3: Review skeleton
     if session.current_stage == "skeleton":
         trip = load_trip(session.stage_file("skeleton"))
-        from post_trip_summary.pipeline.review_skeleton import review_skeleton
-        trip = review_skeleton(trip)
-        save_trip(trip, session.stage_file("skeleton_reviewed"))
+        if click.confirm("Review skeleton in browser?", default=True):
+            def _save_skeleton(t):
+                save_trip(t, session.stage_file("skeleton_reviewed"))
+            # Save initial copy so browser edits persist even if user just closes
+            save_trip(trip, session.stage_file("skeleton_reviewed"))
+            from post_trip_summary.preview.server import run_preview
+            run_preview(trip, save_fn=_save_skeleton, open_path="/review/skeleton")
+            trip = load_trip(session.stage_file("skeleton_reviewed"))
+        else:
+            from post_trip_summary.pipeline.review_skeleton import review_skeleton
+            trip = review_skeleton(trip)
+            save_trip(trip, session.stage_file("skeleton_reviewed"))
         session.current_stage = "skeleton_reviewed"
         session.save()
 
+    # Optional: Cull photos in browser
+    if session.current_stage == "skeleton_reviewed":
+        total_photos = sum(len(e.photos) for d in trip.days for e in d.events) if 'trip' in dir() else 0
+        if total_photos == 0:
+            trip = load_trip(session.stage_file("skeleton_reviewed"))
+            total_photos = sum(len(e.photos) for d in trip.days for e in d.events)
+        if total_photos > 0 and click.confirm(
+            f"\nCull photos before enrichment? ({total_photos} photos — opens browser)", default=False
+        ):
+            def _save_cull(t):
+                save_trip(t, session.stage_file("skeleton_reviewed"))
+            from post_trip_summary.preview.server import run_preview
+            run_preview(trip, save_fn=_save_cull, open_path="/review/cull")
+            # Reload after browser review (user may have changed data)
+            trip = load_trip(session.stage_file("skeleton_reviewed"))
+            kept = sum(1 for d in trip.days for e in d.events for p in e.photos if p.is_kept)
+            click.echo(f"Kept {kept}/{total_photos} photos.")
+
     # Stage 4: Enrich
     if session.current_stage == "skeleton_reviewed":
+        click.echo("\n=== Stage 4: Enriching events with vision AI ===")
+        t0 = time.perf_counter()
         trip = load_trip(session.stage_file("skeleton_reviewed"))
         from post_trip_summary.pipeline.enrich import enrich_trip
         trip = enrich_trip(trip)
         save_trip(trip, session.stage_file("enriched"))
         session.current_stage = "enriched"
         session.save()
+        click.echo(f"  Enrich completed in {_fmt_duration(time.perf_counter() - t0)}")
+
+    # Optional: Pick highlights in browser
+    if session.current_stage == "enriched":
+        trip = load_trip(session.stage_file("enriched"))
+        kept = sum(1 for d in trip.days for e in d.events for p in e.photos if p.is_kept)
+        highlighted = sum(1 for d in trip.days for e in d.events for p in e.photos if p.is_kept and p.is_highlight)
+        if kept > 0 and click.confirm(
+            f"\nPick highlights in browser? ({highlighted}/{kept} currently highlighted)", default=False
+        ):
+            save_trip(trip, session.stage_file("final"))
+            def _save_highlights(t):
+                save_trip(t, session.stage_file("final"))
+            from post_trip_summary.preview.server import run_preview
+            run_preview(trip, save_fn=_save_highlights, open_path="/review/highlights")
+            trip = load_trip(session.stage_file("final"))
+            highlighted = sum(1 for d in trip.days for e in d.events for p in e.photos if p.is_kept and p.is_highlight)
+            click.echo(f"Selected {highlighted} highlights.")
+            session.current_stage = "final"
+            session.save()
 
     # Stage 5: Review details
     if session.current_stage == "enriched":
@@ -200,6 +287,7 @@ def generate(slug: str, base_dir: Path | None):
     output_dir.mkdir(parents=True, exist_ok=True)
 
     click.echo("\n=== Generating outputs ===")
+    t0 = time.perf_counter()
 
     click.echo("  Preparing photos...")
     prepare_photos(trip, output_dir)
@@ -218,7 +306,89 @@ def generate(slug: str, base_dir: Path | None):
 
     session.current_stage = "generated"
     session.save()
-    click.echo(f"\nOutputs saved to: {output_dir}")
+    click.echo(f"\nOutputs saved to: {output_dir} ({_fmt_duration(time.perf_counter() - t0)})")
+
+
+@cli.command("cull-photos")
+@click.argument("slug")
+@click.option("--port", default=8765, help="Server port")
+@click.option("--base-dir", type=click.Path(path_type=Path), default=None, hidden=True)
+def cull_photos(slug: str, port: int, base_dir: Path | None):
+    """Visually review and cull photos in browser (after skeleton)."""
+    base = base_dir or DEFAULT_BASE_DIR
+    session = load_session(slug, base_dir=base)
+    if session.current_stage not in ("skeleton", "skeleton_reviewed"):
+        click.echo(f"Cull requires skeleton stage (current: {session.current_stage}).")
+        raise SystemExit(1)
+
+    from post_trip_summary.serialization import load_trip, save_trip
+    stage = session.current_stage
+    trip = load_trip(session.stage_file(stage))
+
+    total = sum(len(e.photos) for d in trip.days for e in d.events)
+    click.echo(f"Loaded {total} photos across {sum(len(d.events) for d in trip.days)} events.")
+
+    def _save(t):
+        save_trip(t, session.stage_file(stage))
+
+    from post_trip_summary.preview.server import run_preview
+    run_preview(trip, port=port, save_fn=_save, open_path="/review/cull")
+
+
+@cli.command("review-skeleton")
+@click.argument("slug")
+@click.option("--port", default=8765, help="Server port")
+@click.option("--base-dir", type=click.Path(path_type=Path), default=None, hidden=True)
+def review_skeleton_cmd(slug: str, port: int, base_dir: Path | None):
+    """Review and edit trip skeleton in browser (after skeleton build)."""
+    base = base_dir or DEFAULT_BASE_DIR
+    session = load_session(slug, base_dir=base)
+    if session.current_stage not in ("skeleton", "skeleton_reviewed"):
+        click.echo(f"Review-skeleton requires skeleton stage (current: {session.current_stage}).")
+        raise SystemExit(1)
+
+    from post_trip_summary.serialization import load_trip, save_trip
+    stage = session.current_stage
+    trip = load_trip(session.stage_file(stage))
+
+    total_events = sum(len(d.events) for d in trip.days)
+    click.echo(f"Loaded {total_events} events across {len(trip.days)} days.")
+
+    def _save(t):
+        save_trip(t, session.stage_file(stage))
+
+    from post_trip_summary.preview.server import run_preview
+    run_preview(trip, port=port, save_fn=_save, open_path="/review/skeleton")
+
+
+@cli.command("pick-highlights")
+@click.argument("slug")
+@click.option("--port", default=8765, help="Server port")
+@click.option("--base-dir", type=click.Path(path_type=Path), default=None, hidden=True)
+def pick_highlights(slug: str, port: int, base_dir: Path | None):
+    """Visually pick highlight photos in browser (after enrichment)."""
+    base = base_dir or DEFAULT_BASE_DIR
+    session = load_session(slug, base_dir=base)
+    if session.current_stage not in ("enriched", "final"):
+        click.echo(f"Pick-highlights requires enriched or final stage (current: {session.current_stage}).")
+        raise SystemExit(1)
+
+    from post_trip_summary.serialization import load_trip, save_trip
+    # Load from most recent available stage
+    if session.stage_file("final").exists():
+        trip = load_trip(session.stage_file("final"))
+    else:
+        trip = load_trip(session.stage_file("enriched"))
+
+    kept = sum(1 for d in trip.days for e in d.events for p in e.photos if p.is_kept)
+    highlighted = sum(1 for d in trip.days for e in d.events for p in e.photos if p.is_kept and p.is_highlight)
+    click.echo(f"Loaded {kept} kept photos ({highlighted} highlighted).")
+
+    def _save(t):
+        save_trip(t, session.stage_file("final"))
+
+    from post_trip_summary.preview.server import run_preview
+    run_preview(trip, port=port, save_fn=_save, open_path="/review/highlights")
 
 
 def _generate_static_map(trip, output_dir) -> str | None:
@@ -301,6 +471,15 @@ def _run_ingest(session) -> dict:
         click.echo(f"  Parsing Day One: {do_path}")
         from post_trip_summary.pipeline.ingest.dayone import ingest_dayone
         trip_data["dayone"] = ingest_dayone(Path(do_path))
+
+    # Score photo quality and auto-cull low-quality photos
+    if trip_data["photos"]:
+        click.echo("  Scoring photo quality...")
+        from post_trip_summary.pipeline.quality import score_photos, apply_quality_cull
+        score_photos(trip_data["photos"])
+        cull_pct = session.settings.get("quality_cull_percentile", 15)
+        culled = apply_quality_cull(trip_data["photos"], percentile=cull_pct)
+        click.echo(f"    Auto-removed {culled} low-quality photos (bottom {cull_pct}%)")
 
     # Save raw trip data
     data_file = session.session_dir / "trip_data.json"

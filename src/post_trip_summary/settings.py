@@ -19,7 +19,7 @@ DEFAULT_SETTINGS = {
     "vision": {
         "provider": "gemini",
         "gemini_api_key": "",
-        "gemini_model": "gemini-2.0-flash",
+        "gemini_model": "gemini-2.5-flash",
         "claude_api_key": "",
         "claude_model": "claude-sonnet-4-20250514",
     },
@@ -32,7 +32,7 @@ provider = "gemini"
 
 # Gemini settings (or set GOOGLE_API_KEY env var)
 gemini_api_key = ""
-gemini_model = "gemini-2.0-flash"
+gemini_model = "gemini-2.5-flash"
 
 # Claude settings (or set ANTHROPIC_API_KEY env var)
 claude_api_key = ""

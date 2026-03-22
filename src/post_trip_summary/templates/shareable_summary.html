@@ -33,7 +33,7 @@ body { max-width: 800px; }
     {% if event.photos %}
     {% set hl = event.photos | selectattr('is_highlight') | first %}
     {% if hl %}
-    <img src="photos/{{ hl.path.name }}" alt="{{ event.name }}">
+    <img src="{{ hl.path | photo_url }}" alt="{{ event.name }}">
     {% endif %}
     {% endif %}
     <div class="highlight-text">

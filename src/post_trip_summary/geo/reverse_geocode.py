@@ -13,7 +13,9 @@ _last_request_time = 0.0
 _EMPTY_RESULT = {
     "city": "", "country": "", "admin1": "", "admin2": "",
     "suburb": "", "municipality": "", "tourism": "", "leisure": "",
-    "natural": "", "state_district": "", "place_name": "",
+    "natural": "", "state_district": "", "amenity": "", "shop": "",
+    "historic": "", "road": "",
+    "poi_name": "", "area_name": "", "place_name": "",
 }
 
 
@@ -32,19 +34,29 @@ def _build_geo_result(addr: dict) -> dict:
     leisure = addr.get("leisure", "")
     natural = addr.get("natural", "")
     state_district = addr.get("state_district", "")
+    amenity = addr.get("amenity", "")
+    shop = addr.get("shop", "")
+    historic = addr.get("historic", "")
+    road = addr.get("road", "")
 
-    # Best human-readable name via priority chain
-    place_name = (
-        city or tourism or leisure or natural
-        or suburb or municipality or state_district
-        or admin2 or admin1
+    # Specific POI name (most useful for event naming)
+    poi_name = tourism or amenity or leisure or historic or shop or natural or ""
+
+    # Area/neighborhood name (useful for context)
+    area_name = (
+        city or suburb or municipality or state_district
+        or admin2 or admin1 or ""
     )
+
+    # Combined: prefer POI, fall back to area
+    place_name = poi_name or area_name
 
     return {
         "city": city, "country": country, "admin1": admin1, "admin2": admin2,
         "suburb": suburb, "municipality": municipality, "tourism": tourism,
         "leisure": leisure, "natural": natural, "state_district": state_district,
-        "place_name": place_name,
+        "amenity": amenity, "shop": shop, "historic": historic, "road": road,
+        "poi_name": poi_name, "area_name": area_name, "place_name": place_name,
     }
 
 
@@ -68,8 +80,9 @@ def _cached_reverse(lat_rounded: float, lon_rounded: float) -> dict:
 
 
 def reverse_geocode(lat: float, lon: float) -> dict:
-    # Round to ~1.1km precision to maximize cache hits
-    return _cached_reverse(round(lat, 2), round(lon, 2))
+    # Round to ~11m precision; fine enough for POI lookup,
+    # coarse enough to cache overlapping centroids at the same venue.
+    return _cached_reverse(round(lat, 4), round(lon, 4))
 
 
 def reverse_geocode_batch(coords: list[tuple[float, float]]) -> list[dict]:

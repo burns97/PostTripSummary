@@ -47,10 +47,86 @@ def test_enrich_applies_vision_results():
     mock_provider = MagicMock()
     mock_provider.analyze.return_value = mock_result
     mock_provider.estimate_cost.return_value = 0.0
+    mock_provider.synthesize.return_value = "The Eiffel Tower rises above the Paris skyline."
 
     with patch("post_trip_summary.pipeline.enrich.get_vision_settings", return_value={"provider": "gemini", "api_key": "test", "model": "gemini-2.0-flash"}), \
          patch("post_trip_summary.pipeline.enrich.create_provider", return_value=mock_provider), \
          patch("post_trip_summary.pipeline.enrich._read_image", return_value=(b"fakedata", "image/jpeg")):
 
         enriched = enrich_trip(trip, auto_approve=True)
-        assert enriched.days[0].events[0].description == "The Eiffel Tower"
+        # With 3 photos all getting descriptions, synthesis replaces the pass-1 description
+        assert enriched.days[0].events[0].description == "The Eiffel Tower rises above the Paris skyline."
+
+
+def _trip_with_event(event):
+    return Trip(
+        name="Test", date_range=(date(2026, 3, 5), date(2026, 3, 5)),
+        days=[Day(date=date(2026, 3, 5), events=[event])],
+    )
+
+
+def _enrich_patches(mock_provider):
+    return (
+        patch("post_trip_summary.pipeline.enrich.get_vision_settings",
+              return_value={"provider": "gemini", "api_key": "test", "model": "gemini-2.0-flash"}),
+        patch("post_trip_summary.pipeline.enrich.create_provider", return_value=mock_provider),
+        patch("post_trip_summary.pipeline.enrich._read_image", return_value=(b"fakedata", "image/jpeg")),
+    )
+
+
+def test_synthesis_called_for_multi_highlight_events():
+    """Synthesize is called when an event has 2+ described highlights."""
+    event = _event("Eiffel Tower", sources=["exif"], num_photos=3)
+    trip = _trip_with_event(event)
+
+    mock_result = VisionResult(description="A view of the tower", landmark="Eiffel Tower", confidence="high")
+
+    mock_provider = MagicMock()
+    mock_provider.analyze.return_value = mock_result
+    mock_provider.estimate_cost.return_value = 0.0
+    mock_provider.synthesize.return_value = "We visited the Eiffel Tower and enjoyed panoramic views of Paris."
+
+    p1, p2, p3 = _enrich_patches(mock_provider)
+    with p1, p2, p3:
+        enriched = enrich_trip(trip, auto_approve=True)
+
+    mock_provider.synthesize.assert_called_once()
+    assert enriched.days[0].events[0].description == "We visited the Eiffel Tower and enjoyed panoramic views of Paris."
+
+
+def test_synthesis_skipped_for_single_highlight():
+    """Synthesize is NOT called when an event has only 1 highlight."""
+    event = _event("Eiffel Tower", sources=["exif"], num_photos=1)
+    trip = _trip_with_event(event)
+
+    mock_result = VisionResult(description="A view of the tower", confidence="high")
+
+    mock_provider = MagicMock()
+    mock_provider.analyze.return_value = mock_result
+    mock_provider.estimate_cost.return_value = 0.0
+
+    p1, p2, p3 = _enrich_patches(mock_provider)
+    with p1, p2, p3:
+        enrich_trip(trip, auto_approve=True)
+
+    mock_provider.synthesize.assert_not_called()
+
+
+def test_synthesis_failure_keeps_original_description():
+    """If synthesize raises, the pass-1 description is kept."""
+    event = _event("Eiffel Tower", sources=["exif"], num_photos=3)
+    trip = _trip_with_event(event)
+
+    mock_result = VisionResult(description="A view of the tower", confidence="high")
+
+    mock_provider = MagicMock()
+    mock_provider.analyze.return_value = mock_result
+    mock_provider.estimate_cost.return_value = 0.0
+    mock_provider.synthesize.side_effect = RuntimeError("API error")
+
+    p1, p2, p3 = _enrich_patches(mock_provider)
+    with p1, p2, p3:
+        enriched = enrich_trip(trip, auto_approve=True)
+
+    # Pass-1 description should be preserved
+    assert enriched.days[0].events[0].description == "A view of the tower"

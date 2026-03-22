@@ -4,3 +4,6 @@ __pycache__/
 .superpowers/
 exiftool.exe
 exiftool_files/*
+.claude/*
+scripts/*
+src/post_trip_summary.egg-info/*

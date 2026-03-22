@@ -11,7 +11,6 @@ dependencies = [
     "click>=8.1",
     "Pillow>=10.0",
     "pillow-heif>=0.13",
-    "PyExifTool>=0.5",
     "imagehash>=4.3",
     "geopy>=2.4",
     "openpyxl>=3.1",

@@ -14,10 +14,17 @@ def _format_time_filter(dt):
         return dt.strftime("%-I:%M %p")  # Unix
 
 
+def _photo_url_filter(path):
+    """Convert a photo path to its output JPEG URL: photos/<stem>.jpg."""
+    from pathlib import PurePath
+    return f"photos/{PurePath(path).stem}.jpg"
+
+
 def generate_detailed_record(trip: Trip, output_path: Path) -> None:
     """Render the detailed record HTML."""
     env = Environment(loader=PackageLoader("post_trip_summary", "templates"))
     env.filters["ftime"] = _format_time_filter
+    env.filters["photo_url"] = _photo_url_filter
     template = env.get_template("detailed_record.html")
     html = template.render(trip=trip)
     output_path.parent.mkdir(parents=True, exist_ok=True)

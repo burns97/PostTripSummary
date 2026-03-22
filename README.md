@@ -106,12 +106,44 @@ The pipeline runs in stages, saving progress after each step so you can resume a
 
 | Stage | Description |
 |-------|-------------|
-| **Ingest** | Reads photos (EXIF/GPS), Excel itineraries, credit card CSVs, Google Maps timeline, Apple Health, and Day One journals |
-| **Skeleton** | Clusters events by time and location into a day-by-day trip structure |
-| **Review skeleton** | Interactive review to fix event names, merge/split/reorder events |
+| **Ingest** | Reads photos (EXIF/GPS), Excel itineraries, credit card CSVs, Google Maps timeline, Apple Health, and Day One journals. Scores photo quality and auto-culls the bottom percentile. |
+| **Skeleton** | Clusters events by time and location into a day-by-day trip structure, reverse geocodes centroids via Nominatim |
+| **Review skeleton** | Review and edit events in browser or CLI — merge, rename, delete, change type, add notes (browser UI opens by default) |
+| **Cull photos** | Optional browser-based photo review to remove unwanted shots before enrichment |
 | **Enrich** | Uses AI vision (Gemini or Claude) to describe photos and identify landmarks (with cost estimation and approval) |
+| **Pick highlights** | Optional browser-based selection of highlight photos for summary outputs |
 | **Review details** | Final interactive review of descriptions and details |
 | **Generate** | Produces output files: detailed HTML record, shareable PDF, blog post, and a route map |
+
+### Restarting from a stage
+
+Use `--from` to jump back to an earlier stage without re-running everything before it:
+
+```bash
+# Rebuild skeleton without re-ingesting (useful after changing clustering settings)
+post-trip-summary resume iceland-2025 --from skeleton
+
+# Re-run enrichment without rebuilding skeleton
+post-trip-summary resume iceland-2025 --from enriched
+```
+
+Valid values: `ingest`, `skeleton`, `skeleton_reviewed`, `enriched`.
+
+## Browser-based review
+
+Several pipeline stages offer browser-based UIs (powered by FastAPI + Jinja2) as an alternative to the CLI:
+
+- **Skeleton review** (`/review/skeleton`) — Visual event editor with photo thumbnails. Checkbox-select events to merge, click names to rename inline, delete events, change types, and add notes.
+- **Photo cull** (`/review/cull`) — Toggle keep/remove on individual photos with quality score badges. Bulk actions per event.
+- **Highlight picker** (`/review/highlights`) — Select highlight photos for summary outputs.
+
+These can also be launched standalone:
+
+```bash
+post-trip-summary review-skeleton iceland-2025
+post-trip-summary cull-photos iceland-2025
+post-trip-summary pick-highlights iceland-2025
+```
 
 ## Supported inputs
 
@@ -136,10 +168,14 @@ post-trip-summary new <name>              Create a new trip session
 post-trip-summary list                    List all sessions
 post-trip-summary add-input <slug> ...    Add data sources to a session
 post-trip-summary resume <slug>           Resume pipeline from last stage
+post-trip-summary resume <slug> --from <stage>  Restart from a specific stage
 post-trip-summary preview <slug>          Preview trip in browser (FastAPI)
 post-trip-summary generate <slug>         Generate final output files
-post-trip-summary config                 View/edit global settings
+post-trip-summary config                  View/edit global settings
 post-trip-summary delete <slug>           Delete a session
+post-trip-summary review-skeleton <slug>  Review skeleton in browser (standalone)
+post-trip-summary cull-photos <slug>      Cull photos in browser (standalone)
+post-trip-summary pick-highlights <slug>  Pick highlights in browser (standalone)
 ```
 
 ## Project structure
@@ -151,17 +187,36 @@ src/post_trip_summary/
 ├── settings.py             # Global settings (vision provider, API keys)
 ├── models.py               # Core data models (Trip, Day, Event, Photo, etc.)
 ├── serialization.py        # JSON serialization/deserialization
-├── geo/                    # Geo clustering and reverse geocoding
+├── geo/
+│   ├── clustering.py       # Photo clustering by time gap + GPS distance
+│   ├── interpolate.py      # GPS interpolation for photos missing coordinates
+│   └── reverse_geocode.py  # Nominatim reverse geocoding with LRU cache
 ├── pipeline/
 │   ├── ingest/             # Data source parsers (photos, excel, credit card, etc.)
-│   ├── skeleton.py         # Build day-by-day trip structure
-│   ├── review_skeleton.py  # Interactive skeleton review
+│   ├── skeleton.py         # Build day-by-day trip structure from clusters
+│   ├── skeleton_ops.py     # Skeleton editing operations (merge, rename, delete, etc.)
+│   ├── quality.py          # Photo quality scoring and auto-cull
+│   ├── review_skeleton.py  # Interactive skeleton review (CLI fallback)
 │   ├── review_details.py   # Interactive detail review
 │   └── enrich.py           # Vision API enrichment with cost gate
-├── vision/                 # Vision providers (Gemini, Claude) and prompts
-├── output/                 # Output generators (HTML, PDF, blog, photo prep)
-├── preview/                # FastAPI preview server
-└── templates/              # Jinja2 HTML templates
+├── vision/
+│   ├── client.py           # Abstract VisionProvider + Claude implementation
+│   ├── gemini.py           # Gemini vision provider
+│   ├── triage.py           # Photo dedup and highlight selection
+│   └── prompts.py          # Vision prompt templates
+├── output/
+│   ├── detailed_record.py  # Full HTML record generation
+│   ├── shareable_pdf.py    # Summary PDF with route map
+│   ├── blog_post.py        # Blog HTML output
+│   └── photo_prep.py       # Highlight photo organization
+├── preview/
+│   └── server.py           # FastAPI preview + review server
+└── templates/
+    ├── detailed_record.html
+    ├── shareable_summary.html
+    ├── blog_post.html
+    ├── photo_review.html      # Cull / highlights browser UI
+    └── skeleton_review.html   # Skeleton review browser UI
 ```
 
 ## Session data

@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ trip.name }} — Skeleton Review</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #1a1a2e; color: #eee; padding: 1rem; }
+  h1 { margin-bottom: 0.5rem; font-size: 1.4rem; }
+  .subtitle { color: #888; margin-bottom: 1rem; font-size: 0.9rem; }
+
+  .toolbar {
+    position: sticky; top: 0; background: #1a1a2e; padding: 0.5rem 0; z-index: 20;
+    border-bottom: 1px solid #333; margin-bottom: 1rem;
+    display: flex; align-items: center; gap: 1rem; flex-wrap: wrap;
+  }
+  .toolbar .stats { font-size: 0.9rem; color: #aaa; }
+  .merge-btn {
+    padding: 0.4rem 1rem; font-size: 0.85rem; font-weight: 600;
+    border: none; border-radius: 6px; cursor: pointer;
+    background: #2ecc71; color: #000; transition: opacity 0.15s;
+  }
+  .merge-btn:disabled { opacity: 0.3; cursor: default; }
+  .merge-btn:not(:disabled):hover { opacity: 0.85; }
+  .merge-warning { color: #e74c3c; font-size: 0.8rem; }
+  .done-msg { color: #888; font-size: 0.85rem; margin-left: auto; }
+
+  details { margin-bottom: 1.5rem; }
+  summary.day-header {
+    cursor: pointer; font-size: 1.15rem; font-weight: 600;
+    padding: 0.5rem 0; border-bottom: 1px solid #333;
+  }
+  summary.day-header .event-count { color: #888; font-weight: 400; font-size: 0.85rem; }
+
+  .event-card {
+    margin: 0.75rem 0; padding: 0.75rem; background: #16213e; border-radius: 8px;
+    border: 2px solid transparent; transition: border-color 0.15s;
+  }
+  .event-card.selected { border-color: #2ecc71; }
+
+  .event-top {
+    display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 0.4rem;
+  }
+  .event-check { width: 18px; height: 18px; cursor: pointer; accent-color: #2ecc71; }
+  .type-icon { font-size: 1.1rem; }
+  .event-name-input {
+    background: transparent; border: 1px solid transparent; color: #eee;
+    font-size: 1rem; font-weight: 600; padding: 0.15rem 0.4rem; border-radius: 4px;
+    flex: 1; min-width: 150px;
+  }
+  .event-name-input:hover { border-color: #444; }
+  .event-name-input:focus { border-color: #2ecc71; outline: none; background: #0f3460; }
+  .event-time { color: #888; font-size: 0.85rem; white-space: nowrap; }
+  .photo-count { font-size: 0.75rem; background: #0f3460; padding: 0.15rem 0.5rem; border-radius: 10px; color: #aaa; }
+  .source-badges { display: flex; gap: 0.3rem; flex-wrap: wrap; }
+  .source-badge {
+    font-size: 0.65rem; background: #333; padding: 0.1rem 0.4rem;
+    border-radius: 3px; color: #aaa; text-transform: lowercase;
+  }
+
+  .thumb-strip {
+    display: flex; gap: 4px; overflow-x: auto; padding: 0.4rem 0;
+    scrollbar-width: thin; scrollbar-color: #444 transparent;
+  }
+  .thumb-strip img {
+    display: block; width: 100px; height: 75px; object-fit: cover;
+    border-radius: 4px; flex-shrink: 0;
+  }
+  .thumb-more {
+    display: flex; align-items: center; justify-content: center;
+    min-width: 60px; height: 75px; background: #0f3460; border-radius: 4px;
+    font-size: 0.8rem; color: #aaa; flex-shrink: 0;
+  }
+
+  .event-actions {
+    display: flex; gap: 0.5rem; margin-top: 0.4rem; flex-wrap: wrap; align-items: center;
+  }
+  .action-btn {
+    padding: 0.2rem 0.6rem; font-size: 0.75rem; border: 1px solid #555;
+    background: #0f3460; color: #ddd; border-radius: 4px; cursor: pointer;
+  }
+  .action-btn:hover { background: #1a4a8a; }
+  .action-btn.danger { border-color: #e74c3c; color: #e74c3c; }
+  .action-btn.danger:hover { background: #5c1a1a; }
+  .type-select {
+    padding: 0.2rem 0.4rem; font-size: 0.75rem; background: #0f3460;
+    color: #ddd; border: 1px solid #555; border-radius: 4px;
+  }
+  .note-input {
+    background: #0f3460; border: 1px solid #555; color: #ddd; font-size: 0.75rem;
+    padding: 0.2rem 0.4rem; border-radius: 4px; flex: 1; min-width: 120px;
+  }
+  .note-input:focus { border-color: #2ecc71; outline: none; }
+
+  /* Merge name prompt */
+  .merge-prompt {
+    display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(0,0,0,0.7); z-index: 100; justify-content: center; align-items: center;
+  }
+  .merge-prompt.active { display: flex; }
+  .merge-dialog {
+    background: #16213e; border: 1px solid #444; border-radius: 12px;
+    padding: 1.5rem; max-width: 450px; width: 90%;
+  }
+  .merge-dialog h3 { margin-bottom: 0.75rem; }
+  .merge-dialog input {
+    width: 100%; padding: 0.5rem; font-size: 1rem; background: #0f3460;
+    border: 1px solid #555; color: #eee; border-radius: 6px; margin-bottom: 1rem;
+  }
+  .merge-dialog input:focus { border-color: #2ecc71; outline: none; }
+  .merge-dialog .btns { display: flex; gap: 0.5rem; justify-content: flex-end; }
+  .merge-dialog .btn-confirm {
+    padding: 0.4rem 1.2rem; background: #2ecc71; color: #000; border: none;
+    border-radius: 6px; font-weight: 600; cursor: pointer;
+  }
+  .merge-dialog .btn-cancel {
+    padding: 0.4rem 1.2rem; background: #555; color: #eee; border: none;
+    border-radius: 6px; cursor: pointer;
+  }
+</style>
+</head>
+<body>
+
+<h1>{{ trip.name }}</h1>
+<p class="subtitle">Review your trip skeleton. Check events to merge, click names to rename, or use action buttons to edit.</p>
+
+<div class="toolbar">
+  <button class="merge-btn" id="merge-btn" disabled onclick="openMergePrompt()">Merge Selected (0)</button>
+  <span class="merge-warning" id="merge-warning"></span>
+  <span class="stats" id="global-stats"></span>
+  <span class="done-msg">Close browser tab and press Ctrl+C in terminal when done</span>
+</div>
+
+{% for day in trip.days %}
+{% set day_idx = loop.index0 %}
+<details open data-day-index="{{ day_idx }}">
+  <summary class="day-header">
+    {{ day.date.strftime("%A, %B %d") }}
+    <span class="event-count">({{ day.events | length }} events)</span>
+  </summary>
+  {% for event in day.events %}
+  <div class="event-card" data-event-id="{{ event.id }}" data-day-index="{{ day_idx }}">
+    <div class="event-top">
+      <input type="checkbox" class="event-check" data-event-id="{{ event.id }}" data-day-index="{{ day_idx }}" onchange="updateSelection()">
+      <span class="type-icon">{{ type_icons.get(event.type, "\u2753") }}</span>
+      <input type="text" class="event-name-input" value="{{ event.name }}" data-event-id="{{ event.id }}" data-original="{{ event.name }}" onblur="onRenameBlur(this)" onkeydown="if(event.key==='Enter')this.blur()">
+      <span class="event-time">{{ event.time_range[0]|ftime }} – {{ event.time_range[1]|ftime }}</span>
+      {% if event.photos %}
+      <span class="photo-count">{{ event.photos | length }} photos</span>
+      {% endif %}
+      <span class="source-badges">
+        {% for src in event.sources %}<span class="source-badge">{{ src }}</span>{% endfor %}
+      </span>
+    </div>
+    {% if event.photos %}
+    <div class="thumb-strip">
+      {% for photo in event.photos[:8] %}
+      <img src="/photos/{{ event.id }}/{{ loop.index0 }}" loading="lazy" alt="Photo {{ loop.index0 + 1 }}">
+      {% endfor %}
+      {% if event.photos | length > 8 %}
+      <div class="thumb-more">+{{ event.photos | length - 8 }} more</div>
+      {% endif %}
+    </div>
+    {% endif %}
+    <div class="event-actions">
+      <button class="action-btn danger" onclick="deleteEvent('{{ event.id }}', {{ day_idx }})">Delete</button>
+      <select class="type-select" data-event-id="{{ event.id }}" onchange="changeType(this)">
+        {% for t in ["landmark", "restaurant", "hotel", "activity", "transit", "unknown"] %}
+        <option value="{{ t }}" {% if t == event.type %}selected{% endif %}>{{ type_icons.get(t, "") }} {{ t }}</option>
+        {% endfor %}
+      </select>
+      <input type="text" class="note-input" placeholder="Add note..." value="{{ event.notes }}" data-event-id="{{ event.id }}" onblur="onNoteBlur(this)" onkeydown="if(event.key==='Enter')this.blur()">
+    </div>
+  </div>
+  {% endfor %}
+</details>
+{% endfor %}
+
+<div class="merge-prompt" id="merge-prompt">
+  <div class="merge-dialog">
+    <h3>Merge Events</h3>
+    <p style="color:#aaa; margin-bottom:0.75rem; font-size:0.85rem;" id="merge-info"></p>
+    <input type="text" id="merge-name-input" placeholder="Name for merged event">
+    <div class="btns">
+      <button class="btn-cancel" onclick="closeMergePrompt()">Cancel</button>
+      <button class="btn-confirm" onclick="confirmMerge()">Merge</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const TYPE_ICONS = {{ type_icons | tojson }};
+
+function getSelected() {
+  return Array.from(document.querySelectorAll('.event-check:checked'));
+}
+
+function updateSelection() {
+  const checked = getSelected();
+  const btn = document.getElementById('merge-btn');
+  const warning = document.getElementById('merge-warning');
+  btn.textContent = `Merge Selected (${checked.length})`;
+  warning.textContent = '';
+
+  if (checked.length < 2) {
+    btn.disabled = true;
+    return;
+  }
+
+  const days = new Set(checked.map(c => c.dataset.dayIndex));
+  if (days.size > 1) {
+    btn.disabled = true;
+    warning.textContent = 'Select events from one day only';
+    return;
+  }
+
+  btn.disabled = false;
+}
+
+async function openMergePrompt() {
+  const checked = getSelected();
+  const eventIds = checked.map(c => c.dataset.eventId);
+
+  const resp = await fetch('/api/skeleton/suggest-merge-name', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({event_ids: eventIds})
+  });
+  const data = await resp.json();
+
+  document.getElementById('merge-info').textContent = `Merging ${eventIds.length} events`;
+  document.getElementById('merge-name-input').value = data.suggested_name;
+  document.getElementById('merge-prompt').classList.add('active');
+  document.getElementById('merge-name-input').focus();
+  document.getElementById('merge-name-input').select();
+}
+
+function closeMergePrompt() {
+  document.getElementById('merge-prompt').classList.remove('active');
+}
+
+async function confirmMerge() {
+  const checked = getSelected();
+  const eventIds = checked.map(c => c.dataset.eventId);
+  const dayIndex = parseInt(checked[0].dataset.dayIndex);
+  const newName = document.getElementById('merge-name-input').value.trim();
+  if (!newName) return;
+
+  closeMergePrompt();
+
+  const resp = await fetch('/api/skeleton/merge', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({day_index: dayIndex, event_ids: eventIds, new_name: newName})
+  });
+  if (!resp.ok) { alert('Merge failed'); return; }
+  const data = await resp.json();
+
+  // Re-render the day section
+  const details = document.querySelector(`details[data-day-index="${dayIndex}"]`);
+  renderDay(details, dayIndex, data.day_events);
+  updateGlobalStats();
+}
+
+function renderDay(details, dayIndex, events) {
+  // Remove old event cards
+  details.querySelectorAll('.event-card').forEach(c => c.remove());
+
+  // Build new cards
+  events.forEach(ev => {
+    const card = document.createElement('div');
+    card.className = 'event-card';
+    card.dataset.eventId = ev.id;
+    card.dataset.dayIndex = dayIndex;
+
+    const icon = TYPE_ICONS[ev.type] || '\u2753';
+    const photoCount = ev.photo_count || 0;
+    const sources = (ev.sources || []).map(s => `<span class="source-badge">${s}</span>`).join('');
+    const thumbs = (ev.thumb_urls || []).slice(0, 8).map(u => `<img src="${u}" loading="lazy">`).join('');
+    const moreCount = photoCount > 8 ? photoCount - 8 : 0;
+    const moreEl = moreCount > 0 ? `<div class="thumb-more">+${moreCount} more</div>` : '';
+
+    const typeOpts = ["landmark","restaurant","hotel","activity","transit","unknown"].map(t =>
+      `<option value="${t}" ${t===ev.type?'selected':''}>${TYPE_ICONS[t]||''} ${t}</option>`
+    ).join('');
+
+    card.innerHTML = `
+      <div class="event-top">
+        <input type="checkbox" class="event-check" data-event-id="${ev.id}" data-day-index="${dayIndex}" onchange="updateSelection()">
+        <span class="type-icon">${icon}</span>
+        <input type="text" class="event-name-input" value="${ev.name}" data-event-id="${ev.id}" data-original="${ev.name}" onblur="onRenameBlur(this)" onkeydown="if(event.key==='Enter')this.blur()">
+        <span class="event-time">${ev.time_range}</span>
+        ${photoCount ? `<span class="photo-count">${photoCount} photos</span>` : ''}
+        <span class="source-badges">${sources}</span>
+      </div>
+      ${photoCount ? `<div class="thumb-strip">${thumbs}${moreEl}</div>` : ''}
+      <div class="event-actions">
+        <button class="action-btn danger" onclick="deleteEvent('${ev.id}', ${dayIndex})">Delete</button>
+        <select class="type-select" data-event-id="${ev.id}" onchange="changeType(this)">${typeOpts}</select>
+        <input type="text" class="note-input" placeholder="Add note..." value="${ev.notes || ''}" data-event-id="${ev.id}" onblur="onNoteBlur(this)" onkeydown="if(event.key==='Enter')this.blur()">
+      </div>`;
+    details.appendChild(card);
+  });
+
+  // Update event count in header
+  const countSpan = details.querySelector('.event-count');
+  if (countSpan) countSpan.textContent = `(${events.length} events)`;
+}
+
+async function onRenameBlur(input) {
+  const eventId = input.dataset.eventId;
+  const newName = input.value.trim();
+  const original = input.dataset.original;
+  if (!newName || newName === original) {
+    input.value = original;
+    return;
+  }
+  const resp = await fetch('/api/skeleton/rename', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({event_id: eventId, new_name: newName})
+  });
+  if (resp.ok) {
+    input.dataset.original = newName;
+  } else {
+    input.value = original;
+  }
+}
+
+async function deleteEvent(eventId, dayIndex) {
+  if (!confirm('Delete this event?')) return;
+  const resp = await fetch('/api/skeleton/delete', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({event_id: eventId})
+  });
+  if (!resp.ok) { alert('Delete failed'); return; }
+  const data = await resp.json();
+
+  const card = document.querySelector(`.event-card[data-event-id="${eventId}"]`);
+  if (card) card.remove();
+
+  // Update event count
+  const details = document.querySelector(`details[data-day-index="${dayIndex}"]`);
+  const remaining = details.querySelectorAll('.event-card').length;
+  const countSpan = details.querySelector('.event-count');
+  if (countSpan) countSpan.textContent = `(${remaining} events)`;
+
+  updateSelection();
+  updateGlobalStats();
+}
+
+async function changeType(select) {
+  const eventId = select.dataset.eventId;
+  const newType = select.value;
+  const resp = await fetch('/api/skeleton/update-type', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({event_id: eventId, new_type: newType})
+  });
+  if (resp.ok) {
+    const card = select.closest('.event-card');
+    const iconSpan = card.querySelector('.type-icon');
+    iconSpan.textContent = TYPE_ICONS[newType] || '\u2753';
+  }
+}
+
+async function onNoteBlur(input) {
+  const eventId = input.dataset.eventId;
+  const note = input.value.trim();
+  await fetch('/api/skeleton/add-note', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({event_id: eventId, note: note})
+  });
+}
+
+function updateGlobalStats() {
+  const events = document.querySelectorAll('.event-card').length;
+  const days = document.querySelectorAll('details[data-day-index]').length;
+  document.getElementById('global-stats').textContent = `${events} events across ${days} days`;
+}
+
+// Handle Enter in merge dialog
+document.addEventListener('keydown', e => {
+  if (e.key === 'Enter' && document.getElementById('merge-prompt').classList.contains('active')) {
+    confirmMerge();
+  } else if (e.key === 'Escape') {
+    closeMergePrompt();
+  }
+});
+
+// Init
+document.addEventListener('DOMContentLoaded', updateGlobalStats);
+</script>
+</body>
+</html>

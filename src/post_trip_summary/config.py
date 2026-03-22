@@ -11,6 +11,7 @@ DEFAULT_BASE_DIR = Path.home() / ".post-trip-summary" / "sessions"
 DEFAULT_SETTINGS = {
     "cluster_time_gap_minutes": 15,
     "cluster_distance_meters": 200,
+    "quality_cull_percentile": 15,
 }
 
 STAGES = ["new", "ingest", "skeleton", "skeleton_reviewed", "enriched", "final", "generated"]

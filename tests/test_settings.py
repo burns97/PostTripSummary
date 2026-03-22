@@ -23,7 +23,7 @@ def test_save_and_load_round_trip(tmp_path):
         "vision": {
             "provider": "claude",
             "gemini_api_key": "",
-            "gemini_model": "gemini-2.0-flash",
+            "gemini_model": "gemini-2.5-flash",
             "claude_api_key": "sk-test-123",
             "claude_model": "claude-sonnet-4-20250514",
         },
@@ -76,7 +76,7 @@ def test_get_vision_settings(tmp_path):
     vs = get_vision_settings(path)
     assert set(vs.keys()) == {"provider", "api_key", "model"}
     assert vs["provider"] == "gemini"
-    assert vs["model"] == "gemini-2.0-flash"
+    assert vs["model"] == "gemini-2.5-flash"
 
 
 def test_ensure_settings_file_creates(tmp_path):

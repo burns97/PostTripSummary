@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ trip.name }} — {% if mode == "cull" %}Cull Photos{% else %}Pick Highlights{% endif %}</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #1a1a2e; color: #eee; padding: 1rem; }
+  h1 { margin-bottom: 0.5rem; font-size: 1.4rem; }
+  .subtitle { color: #888; margin-bottom: 1.5rem; font-size: 0.9rem; }
+  details { margin-bottom: 1.5rem; }
+  summary.day-header { cursor: pointer; font-size: 1.2rem; font-weight: 600; padding: 0.5rem 0; border-bottom: 1px solid #333; }
+  .event { margin: 1rem 0; padding: 0.75rem; background: #16213e; border-radius: 8px; }
+  .event-header { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 0.5rem; }
+  .event-name { font-weight: 600; font-size: 1rem; }
+  .event-time { color: #888; font-size: 0.85rem; }
+  .event-stats { font-size: 0.85rem; color: #aaa; }
+  .bulk-actions { display: flex; gap: 0.5rem; margin-bottom: 0.5rem; }
+  .bulk-btn { padding: 0.25rem 0.6rem; font-size: 0.75rem; border: 1px solid #555; background: #0f3460; color: #ddd; border-radius: 4px; cursor: pointer; }
+  .bulk-btn:hover { background: #1a4a8a; }
+  .photo-grid { display: flex; flex-wrap: wrap; gap: 6px; }
+  .photo-card { position: relative; cursor: pointer; border-radius: 6px; overflow: hidden; border: 3px solid transparent; transition: all 0.15s ease; }
+  .photo-card img { display: block; width: 225px; height: 168px; object-fit: cover; }
+
+  /* Cull mode styles */
+  .mode-cull .photo-card.kept { border-color: #2ecc71; }
+  .mode-cull .photo-card.removed { border-color: #e74c3c; opacity: 0.4; }
+  .mode-cull .photo-card.removed::after {
+    content: "REMOVED"; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    color: #e74c3c; font-weight: 700; font-size: 0.75rem; background: rgba(0,0,0,0.7);
+    padding: 0.2rem 0.5rem; border-radius: 3px;
+  }
+
+  /* Highlight mode styles */
+  .mode-highlights .photo-card.highlighted { border-color: #f1c40f; box-shadow: 0 0 8px rgba(241,196,15,0.4); }
+  .mode-highlights .photo-card.not-highlighted { opacity: 0.5; }
+  .mode-highlights .photo-card.not-highlighted:hover { opacity: 0.8; }
+
+  .quality-badge {
+    position: absolute; bottom: 4px; left: 4px; font-size: 0.6rem; font-weight: 700;
+    padding: 0.1rem 0.3rem; border-radius: 3px; pointer-events: none;
+    background: rgba(0,0,0,0.7);
+  }
+  .quality-badge.q-good { color: #2ecc71; }
+  .quality-badge.q-mid { color: #f1c40f; }
+  .quality-badge.q-low { color: #e74c3c; }
+
+  .photo-card .ai-desc {
+    display: none; position: absolute; bottom: 0; left: 0; right: 0;
+    background: rgba(0,0,0,0.85); color: #eee; font-size: 0.7rem; padding: 0.3rem;
+    max-height: 60px; overflow-y: auto;
+  }
+  .photo-card:hover .ai-desc { display: block; }
+
+  .status-badge {
+    position: absolute; top: 4px; right: 4px; font-size: 0.65rem; font-weight: 700;
+    padding: 0.1rem 0.3rem; border-radius: 3px; pointer-events: none;
+  }
+  .mode-cull .kept .status-badge { background: #2ecc71; color: #000; }
+  .mode-cull .removed .status-badge { background: #e74c3c; color: #fff; }
+  .mode-highlights .highlighted .status-badge { background: #f1c40f; color: #000; }
+
+  .global-stats { position: sticky; top: 0; background: #1a1a2e; padding: 0.5rem 0; z-index: 10; border-bottom: 1px solid #333; margin-bottom: 1rem; }
+  .global-stats span { margin-right: 1.5rem; font-size: 0.9rem; }
+</style>
+</head>
+<body class="mode-{{ mode }}">
+<h1>{{ trip.name }}</h1>
+<p class="subtitle">
+  {% if mode == "cull" %}
+    Click photos to toggle Keep/Remove. Removed photos will be excluded from vision AI enrichment and outputs.
+  {% else %}
+    Click photos to toggle Highlight. Highlighted photos will appear in outputs.
+  {% endif %}
+</p>
+
+<div class="global-stats" id="global-stats"></div>
+
+{% for day in trip.days %}
+<details{% if loop.first %} open{% endif %}>
+  <summary class="day-header">{{ day.date.strftime("%A, %B %d") }}</summary>
+  {% for event in day.events %}
+  {% if event.photos %}
+  <div class="event" data-event-id="{{ event.id }}">
+    <div class="event-header">
+      <div>
+        <span class="event-name">{{ event.name }}</span>
+        <span class="event-time">{{ event.time_range[0].strftime("%H:%M") }}–{{ event.time_range[1].strftime("%H:%M") }}</span>
+      </div>
+      <div class="event-stats" id="stats-{{ event.id }}"></div>
+    </div>
+    <div class="bulk-actions">
+      {% if mode == "cull" %}
+      <button class="bulk-btn" onclick="bulkAction('{{ event.id }}', 'keep_all')">Keep All</button>
+      <button class="bulk-btn" onclick="bulkAction('{{ event.id }}', 'remove_all')">Remove All</button>
+      {% else %}
+      <button class="bulk-btn" onclick="bulkAction('{{ event.id }}', 'highlight_all')">Highlight All</button>
+      <button class="bulk-btn" onclick="bulkAction('{{ event.id }}', 'highlight_none')">Clear Highlights</button>
+      {% endif %}
+    </div>
+    <div class="photo-grid">
+      {% for photo in event.photos %}
+      {% if mode == "cull" or photo.is_kept %}
+      <div class="photo-card {{ 'kept' if photo.is_kept else 'removed' }}{% if mode == 'highlights' %} {{ 'highlighted' if photo.is_highlight else 'not-highlighted' }}{% endif %}"
+           data-event-id="{{ event.id }}" data-photo-index="{{ loop.index0 }}"
+           data-kept="{{ photo.is_kept | lower }}" data-highlight="{{ photo.is_highlight | lower }}"
+           data-quality="{{ photo.quality_score | default(0) | round | int }}"
+           onclick="togglePhoto(this)">
+        <img src="/photos/{{ event.id }}/{{ loop.index0 }}" loading="lazy" alt="Photo {{ loop.index0 + 1 }}">
+        <span class="status-badge">
+          {% if mode == "cull" %}{{ "KEEP" if photo.is_kept else "CUT" }}{% else %}{{ "★" if photo.is_highlight else "" }}{% endif %}
+        </span>
+        {% if photo.quality_score is not none %}
+        <span class="quality-badge {{ 'q-good' if photo.quality_score >= 70 else ('q-mid' if photo.quality_score >= 40 else 'q-low') }}">Q:{{ photo.quality_score | round | int }}</span>
+        {% endif %}
+        {% if photo.ai_description %}
+        <div class="ai-desc">{{ photo.ai_description }}</div>
+        {% endif %}
+      </div>
+      {% endif %}
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+  {% endfor %}
+</details>
+{% endfor %}
+
+<script>
+const MODE = "{{ mode }}";
+
+function updateStats(eventId, data) {
+  const el = document.getElementById("stats-" + eventId);
+  if (!el) return;
+  if (MODE === "cull") {
+    const removed = data.total - data.kept_count;
+    el.textContent = data.kept_count + " kept, " + removed + " removed / " + data.total + " total";
+  } else {
+    el.textContent = data.highlighted_count + " highlighted / " + data.kept_count + " kept";
+  }
+}
+
+function updateGlobalStats() {
+  const cards = document.querySelectorAll(".photo-card");
+  let total = 0, kept = 0, highlighted = 0;
+  cards.forEach(c => {
+    total++;
+    if (c.dataset.kept === "true") { kept++; }
+    if (c.dataset.highlight === "true") { highlighted++; }
+  });
+  const el = document.getElementById("global-stats");
+  if (MODE === "cull") {
+    el.innerHTML = "<span>Total: " + total + "</span><span>Kept: " + kept + "</span><span>Removed: " + (total - kept) + "</span>";
+  } else {
+    el.innerHTML = "<span>Kept: " + total + "</span><span>Highlighted: " + highlighted + "</span>";
+  }
+}
+
+async function togglePhoto(card) {
+  const eventId = card.dataset.eventId;
+  const photoIndex = parseInt(card.dataset.photoIndex);
+  const endpoint = MODE === "cull" ? "/api/toggle-keep" : "/api/toggle-highlight";
+
+  const resp = await fetch(endpoint, {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({event_id: eventId, photo_index: photoIndex})
+  });
+  const data = await resp.json();
+
+  if (MODE === "cull") {
+    card.dataset.kept = data.is_kept ? "true" : "false";
+    card.className = "photo-card " + (data.is_kept ? "kept" : "removed");
+    card.querySelector(".status-badge").textContent = data.is_kept ? "KEEP" : "CUT";
+    updateStats(eventId, data);
+  } else {
+    card.dataset.highlight = data.is_highlight ? "true" : "false";
+    card.className = "photo-card " + (data.is_highlight ? "highlighted" : "not-highlighted");
+    card.querySelector(".status-badge").textContent = data.is_highlight ? "★" : "";
+    updateStats(eventId, data);
+  }
+  updateGlobalStats();
+}
+
+async function bulkAction(eventId, action) {
+  const resp = await fetch("/api/bulk-action", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({event_id: eventId, action: action})
+  });
+  const data = await resp.json();
+
+  // Update all cards in this event
+  const cards = document.querySelectorAll('.photo-card[data-event-id="' + eventId + '"]');
+  cards.forEach(card => {
+    if (MODE === "cull") {
+      const isKept = (action === "keep_all");
+      card.dataset.kept = isKept ? "true" : "false";
+      card.className = "photo-card " + (isKept ? "kept" : "removed");
+      card.querySelector(".status-badge").textContent = isKept ? "KEEP" : "CUT";
+    } else {
+      const isHighlighted = (action === "highlight_all");
+      card.dataset.highlight = isHighlighted ? "true" : "false";
+      card.className = "photo-card " + (isHighlighted ? "highlighted" : "not-highlighted");
+      card.querySelector(".status-badge").textContent = isHighlighted ? "★" : "";
+    }
+  });
+  updateStats(eventId, data);
+  updateGlobalStats();
+}
+
+// Initialize stats on load
+document.addEventListener("DOMContentLoaded", () => {
+  document.querySelectorAll(".event").forEach(ev => {
+    const eventId = ev.dataset.eventId;
+    const cards = ev.querySelectorAll(".photo-card");
+    let kept = 0, highlighted = 0, total = cards.length;
+    cards.forEach(c => {
+      if (c.dataset.kept === "true") kept++;
+      if (c.dataset.highlight === "true") highlighted++;
+    });
+    const statsEl = document.getElementById("stats-" + eventId);
+    if (MODE === "cull") {
+      statsEl.textContent = kept + " kept, " + (total - kept) + " removed / " + total + " total";
+    } else {
+      statsEl.textContent = highlighted + " highlighted / " + kept + " kept";
+    }
+  });
+  updateGlobalStats();
+});
+</script>
+</body>
+</html>

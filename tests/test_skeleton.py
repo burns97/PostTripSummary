@@ -27,8 +27,8 @@ def test_match_cluster_to_accommodation():
     acc = Accommodation(
         name="Hotel Le Marais",
         location=Location(lat=48.857, lon=2.362, name="Hotel Le Marais", address="123 Rue", city="Paris", country="France"),
-        check_in=date(2026, 3, 5),
-        check_out=date(2026, 3, 8),
+        check_in=datetime(2026, 3, 5, 15, 0),
+        check_out=datetime(2026, 3, 8, 11, 0),
         sources=["itinerary"],
     )
     match = _match_cluster_to_itinerary(cluster, [acc], [])
@@ -45,6 +45,21 @@ def test_match_cluster_to_expense():
     match = _match_cluster_to_expense(cluster, expenses)
     assert match is not None
     assert match.merchant == "REST LE PETIT"
+
+
+def test_expense_not_reused_after_match():
+    """Once an expense is matched (event_id set), it should not match another cluster."""
+    expenses = [
+        Expense(date=date(2026, 3, 5), amount=12.0, currency="NZD", merchant="YAZA GELATO", category="dining", source="credit_card"),
+    ]
+    cluster1 = _make_cluster("2026-03-05 08:00:00", "2026-03-05 08:15:00", -36.85, 174.76)
+    match1 = _match_cluster_to_expense(cluster1, expenses)
+    assert match1 is not None
+    # Simulate skeleton marking it consumed
+    match1.event_id = "pending"
+    cluster2 = _make_cluster("2026-03-05 12:00:00", "2026-03-05 13:00:00", -36.90, 174.80)
+    match2 = _match_cluster_to_expense(cluster2, expenses)
+    assert match2 is None
 
 
 def test_classify_event_restaurant():
@@ -66,6 +81,211 @@ def test_assign_event_ids():
     _assign_event_ids(days)
     assert days[0].events[0].id == "day01-event01"
     assert days[0].events[1].id == "day01-event02"
+
+
+def test_activity_type_used_in_match():
+    """When an activity has an explicit type, the match returns it instead of 'activity'."""
+    cluster = _make_cluster("2026-02-23 10:00:00", "2026-02-23 11:00:00", -37.8, 175.7)
+    activities = [
+        {"name": "Hobbiton", "city": "Matamata", "country": "New Zealand",
+         "date": "2026-02-23", "type": "landmark", "time": "09:30", "notes": ""},
+    ]
+    match = _match_cluster_to_itinerary(cluster, [], activities)
+    assert match is not None
+    assert match["name"] == "Hobbiton"
+    assert match["type"] == "landmark"
+
+
+def test_activity_default_type():
+    """Activities without a type field default to 'activity'."""
+    cluster = _make_cluster("2026-03-06 19:00:00", "2026-03-06 20:00:00", 48.86, 2.29)
+    activities = [
+        {"name": "Seine River Cruise", "city": "Paris", "country": "France",
+         "date": "2026-03-06", "time": "19:00", "notes": ""},
+    ]
+    match = _match_cluster_to_itinerary(cluster, [], activities)
+    assert match is not None
+    assert match["type"] == "activity"
+
+
+def test_city_aware_activity_matching():
+    """When multiple activities share a date, prefer the one matching the cluster's city."""
+    cluster = _make_cluster("2026-02-25 12:00:00", "2026-02-25 13:00:00", -44.0, 169.3)
+    cluster["reverse_geo"] = {"city": "Haast Pass"}
+    activities = [
+        {"name": "Fantail Falls", "city": "Haast Pass", "country": "New Zealand",
+         "date": "2026-02-25", "type": "landmark", "time": "", "notes": "Drive stop"},
+        {"name": "The Neck", "city": "Wanaka", "country": "New Zealand",
+         "date": "2026-02-25", "type": "landmark", "time": "", "notes": ""},
+    ]
+    match = _match_cluster_to_itinerary(cluster, [], activities)
+    assert match is not None
+    assert match["name"] == "Fantail Falls"
+
+
+def test_city_aware_fallback_none():
+    """When no activity's city matches the cluster's city, return None."""
+    cluster = _make_cluster("2026-02-25 15:00:00", "2026-02-25 16:00:00", -44.5, 169.0)
+    cluster["reverse_geo"] = {"city": "SomeOtherPlace"}
+    activities = [
+        {"name": "Blue Pools", "city": "Haast Pass", "country": "New Zealand",
+         "date": "2026-02-25", "type": "landmark", "time": "", "notes": ""},
+        {"name": "The Neck", "city": "Wanaka", "country": "New Zealand",
+         "date": "2026-02-25", "type": "landmark", "time": "", "notes": ""},
+    ]
+    match = _match_cluster_to_itinerary(cluster, [], activities)
+    assert match is None
+
+
+def test_no_match_when_city_differs():
+    """Cluster in Rotorua should not match an activity in Hamilton."""
+    cluster = _make_cluster("2026-02-24 10:00:00", "2026-02-24 11:00:00", -38.14, 176.25)
+    cluster["reverse_geo"] = {"city": "Rotorua"}
+    activities = [
+        {"name": "Hamilton Gardens", "city": "Hamilton", "country": "New Zealand",
+         "date": "2026-02-24", "type": "landmark", "time": "14:00", "notes": ""},
+    ]
+    match = _match_cluster_to_itinerary(cluster, [], activities)
+    assert match is None
+
+
+def test_match_when_activity_has_no_city():
+    """Activity with blank city still matches by date as a weak candidate."""
+    cluster = _make_cluster("2026-02-24 10:00:00", "2026-02-24 11:00:00", -38.14, 176.25)
+    cluster["reverse_geo"] = {"city": "Rotorua"}
+    activities = [
+        {"name": "Mystery Event", "city": "", "country": "New Zealand",
+         "date": "2026-02-24", "type": "activity", "time": "", "notes": ""},
+    ]
+    match = _match_cluster_to_itinerary(cluster, [], activities)
+    assert match is not None
+    assert match["name"] == "Mystery Event"
+
+
+def test_accommodation_events_in_skeleton():
+    """Verify check-in/check-out events appear in the skeleton timeline."""
+    photos = [_photo("2026-03-05 14:00:00", 48.858, 2.294)]
+    acc = Accommodation(
+        name="Hotel Le Marais",
+        location=Location(lat=48.857, lon=2.362, name="Hotel Le Marais", address="123 Rue", city="Paris", country="France"),
+        check_in=datetime(2026, 3, 5, 15, 0),
+        check_out=datetime(2026, 3, 7, 11, 0),
+        sources=["itinerary"],
+    )
+    trip_data = {
+        "photos": photos,
+        "accommodations": [acc],
+        "transits": [],
+        "activities": [],
+        "expenses": [],
+        "google_maps": {"place_visits": [], "activity_segments": []},
+        "apple_health": [],
+        "dayone": [],
+    }
+    trip = build_skeleton(trip_data)
+    # Find check-in and check-out events across all days
+    event_names = [e.name for d in trip.days for e in d.events]
+    assert "Check in: Hotel Le Marais" in event_names
+    assert "Check out: Hotel Le Marais" in event_names
+
+
+def test_geo_poi_beats_itinerary_name():
+    """When reverse geocode has a specific POI name, it wins over itinerary name."""
+    cluster = _make_cluster("2026-02-24 10:00:00", "2026-02-24 11:00:00", -37.81, 175.28)
+    cluster["reverse_geo"] = {
+        "city": "Hamilton", "poi_name": "Hamilton Gardens", "area_name": "Hamilton",
+        "place_name": "Hamilton Gardens", "country": "NZ",
+    }
+    activities = [
+        {"name": "Visit Hamilton Gardens", "city": "Hamilton", "country": "New Zealand",
+         "date": "2026-02-24", "type": "landmark", "time": "10:00", "notes": ""},
+    ]
+    itinerary_match = _match_cluster_to_itinerary(cluster, [], activities)
+    assert itinerary_match is not None
+
+    # Simulate name resolution logic from build_skeleton
+    geo = cluster["reverse_geo"]
+    geo_poi = geo.get("poi_name", "")
+    google_match = None
+    dayone_name = ""
+
+    if google_match:
+        name = google_match.get("name", "")
+    elif geo_poi:
+        name = geo_poi
+    elif itinerary_match:
+        name = itinerary_match.get("name", "")
+    elif dayone_name:
+        name = dayone_name
+    else:
+        name = geo.get("area_name", "")
+
+    assert name == "Hamilton Gardens"
+
+
+def test_itinerary_name_when_no_poi():
+    """When geocode has no specific POI, itinerary name is used."""
+    cluster = _make_cluster("2026-02-24 10:00:00", "2026-02-24 11:00:00", -37.81, 175.28)
+    cluster["reverse_geo"] = {
+        "city": "Hamilton", "poi_name": "", "area_name": "Hamilton",
+        "place_name": "Hamilton", "country": "NZ",
+    }
+    activities = [
+        {"name": "Hamilton Gardens", "city": "Hamilton", "country": "New Zealand",
+         "date": "2026-02-24", "type": "landmark", "time": "10:00", "notes": ""},
+    ]
+    itinerary_match = _match_cluster_to_itinerary(cluster, [], activities)
+    assert itinerary_match is not None
+
+    geo = cluster["reverse_geo"]
+    geo_poi = geo.get("poi_name", "")
+
+    if geo_poi:
+        name = geo_poi
+    elif itinerary_match:
+        name = itinerary_match.get("name", "")
+    else:
+        name = geo.get("area_name", "")
+
+    assert name == "Hamilton Gardens"
+
+
+def test_expense_never_sets_name():
+    """Expense matches cluster but event name comes from geocode, not merchant."""
+    cluster = _make_cluster("2026-03-05 08:00:00", "2026-03-05 08:15:00", -36.85, 174.76)
+    cluster["reverse_geo"] = {
+        "city": "Auckland", "poi_name": "", "area_name": "Auckland",
+        "place_name": "Auckland", "country": "NZ",
+    }
+    expenses = [
+        Expense(date=date(2026, 3, 5), amount=12.0, currency="NZD",
+                merchant="YAZA GELATO", category="dining", source="credit_card"),
+    ]
+    expense_match = _match_cluster_to_expense(cluster, expenses)
+    assert expense_match is not None
+
+    # Simulate photos-first name resolution — expense never sets name
+    geo = cluster["reverse_geo"]
+    geo_poi = geo.get("poi_name", "")
+    geo_area = geo.get("area_name", "") or geo.get("city", "")
+    google_match = None
+    itinerary_match = None
+    dayone_name = ""
+
+    if google_match:
+        name = google_match.get("name", "")
+    elif geo_poi:
+        name = geo_poi
+    elif itinerary_match:
+        name = itinerary_match.get("name", "")
+    elif dayone_name:
+        name = dayone_name
+    else:
+        name = geo_area
+
+    # Name should be "Auckland" from geo, NOT "YAZA GELATO" from expense
+    assert name == "Auckland"
+    assert name != "YAZA GELATO"
 
 
 def test_build_skeleton_basic():

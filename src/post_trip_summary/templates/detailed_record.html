@@ -29,7 +29,7 @@
         {% if highlights %}
         <div class="event-photos">
             {% for photo in highlights %}
-            <img src="photos/{{ photo.path.name }}" alt="{{ photo.ai_description or event.name }}" title="{{ photo.ai_description or '' }}">
+            <img src="{{ photo.path | photo_url }}" alt="{{ photo.ai_description or event.name }}" title="{{ photo.ai_description or '' }}">
             {% endfor %}
         </div>
         {% endif %}

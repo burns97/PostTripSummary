@@ -21,6 +21,8 @@ class Photo:
     timestamp: datetime
     gps: tuple[float, float] | None
     is_highlight: bool = False
+    is_kept: bool = True
+    quality_score: float | None = None  # 0-100 composite quality score
     ai_description: str | None = None
 
 
@@ -63,8 +65,8 @@ class Transit:
 class Accommodation:
     name: str
     location: Location
-    check_in: date
-    check_out: date
+    check_in: datetime
+    check_out: datetime
     sources: list[str] = field(default_factory=list)
 
 

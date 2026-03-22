@@ -8,7 +8,7 @@
 {% if event.photos %}
 {% set hl = event.photos | selectattr('is_highlight') | first %}
 {% if hl %}
-<p><img src="photos/{{ hl.path.name }}" alt="{{ event.name }}" style="max-width:100%;"></p>
+<p><img src="{{ hl.path | photo_url }}" alt="{{ event.name }}" style="max-width:100%;"></p>
 {% endif %}
 {% endif %}
 <p>{{ event.description }}</p>

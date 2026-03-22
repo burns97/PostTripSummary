@@ -4,7 +4,10 @@ from post_trip_summary.vision.prompts import get_prompt, PURPOSES
 
 def test_all_purposes_have_prompts():
     for purpose in PURPOSES:
-        prompt = get_prompt(purpose)
+        kwargs = {}
+        if purpose == "synthesize":
+            kwargs = {"image_count": 3, "descriptions": "1. A photo\n2. Another\n3. Third"}
+        prompt = get_prompt(purpose, **kwargs)
         assert isinstance(prompt, str)
         assert len(prompt) > 50
 
