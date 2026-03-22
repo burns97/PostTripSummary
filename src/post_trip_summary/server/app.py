@@ -1,13 +1,45 @@
 """FastAPI application factory for the wizard server."""
+import io
 from pathlib import Path
+from pathlib import Path as FilePath
 
 import jinja2
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 
 from post_trip_summary.config import SessionConfig, STAGES
 from post_trip_summary.serialization import load_trip
 from post_trip_summary.settings import get_vision_settings
+
+THUMB_MAX_WIDTH = 300
+
+
+def _build_event_index(trip):
+    """Build {event_id: event} lookup dict."""
+    if trip is None:
+        return {}
+    index = {}
+    for day in trip.days:
+        for event in day.events:
+            index[event.id] = event
+    return index
+
+
+def _make_thumbnail(photo_path: FilePath) -> bytes:
+    """Generate a JPEG thumbnail, handling HEIC/HEIF."""
+    from PIL import Image
+
+    suffix = photo_path.suffix.lower()
+    if suffix in (".heic", ".heif"):
+        import pillow_heif
+        pillow_heif.register_heif_opener()
+    img = Image.open(photo_path)
+    img.thumbnail((THUMB_MAX_WIDTH, THUMB_MAX_WIDTH))
+    if img.mode != "RGB":
+        img = img.convert("RGB")
+    buf = io.BytesIO()
+    img.save(buf, format="JPEG", quality=80)
+    return buf.getvalue()
 
 # Map stages to the wizard step the user should be on next
 STAGE_TO_STEP = {
@@ -69,6 +101,7 @@ def create_app(session: SessionConfig) -> FastAPI:
     app.state.trip = _load_trip_for_stage(session)
     app.state.thumb_cache = {}
     app.state.background_task = None
+    app.state.event_index = _build_event_index(app.state.trip)
 
     env = jinja2.Environment(
         loader=jinja2.PackageLoader("post_trip_summary", "templates"),
@@ -128,6 +161,32 @@ def create_app(session: SessionConfig) -> FastAPI:
 
         app.state.session.save()
         return JSONResponse({"status": "ok"})
+
+    @app.get("/photos/{event_id}/{photo_idx}")
+    def serve_photo_by_event(event_id: str, photo_idx: int):
+        event = app.state.event_index.get(event_id)
+        if not event or photo_idx >= len(event.photos):
+            raise HTTPException(404, "Photo not found")
+        photo = event.photos[photo_idx]
+        cache_key = (event_id, photo_idx)
+        if cache_key not in app.state.thumb_cache:
+            app.state.thumb_cache[cache_key] = _make_thumbnail(photo.path)
+        return Response(content=app.state.thumb_cache[cache_key], media_type="image/jpeg")
+
+    @app.get("/photos/{filename}")
+    def serve_photo_by_name(filename: str):
+        if app.state.trip is None:
+            raise HTTPException(404, "No trip loaded")
+        stem = FilePath(filename).stem
+        for day in app.state.trip.days:
+            for event in day.events:
+                for photo in event.photos:
+                    if photo.path.stem == stem:
+                        cache_key = ("name", stem)
+                        if cache_key not in app.state.thumb_cache:
+                            app.state.thumb_cache[cache_key] = _make_thumbnail(photo.path)
+                        return Response(content=app.state.thumb_cache[cache_key], media_type="image/jpeg")
+        raise HTTPException(404, f"Photo not found: {filename}")
 
     # Placeholder routes for remaining wizard steps
     for step_name in ["ingest", "review", "enrich", "highlights", "generate"]:
