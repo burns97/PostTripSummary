@@ -1,0 +1,471 @@
+{% extends "wizard.html" %}
+
+{% block title %}{{ trip.name }} — Review{% endblock %}
+
+{% block extra_css %}
+/* Sticky stats bar */
+.review-stats-bar {
+    position: sticky; top: 0; z-index: 30;
+    background: #1a1a2e; border-bottom: 1px solid #333;
+    padding: 0.6rem 1rem; margin: -2em -2em 1.5rem -2em;
+    display: flex; align-items: center; gap: 1.2rem; flex-wrap: wrap;
+}
+.review-stats-bar .stat { font-size: 0.9rem; color: #aaa; }
+.review-stats-bar .stat strong { color: #e0e0e0; }
+.review-stats-bar .merge-btn {
+    padding: 0.4rem 1rem; font-size: 0.85rem; font-weight: 600;
+    border: none; border-radius: 6px; cursor: pointer;
+    background: #2ecc71; color: #000; transition: opacity 0.15s;
+}
+.review-stats-bar .merge-btn:disabled { opacity: 0.3; cursor: default; }
+.review-stats-bar .merge-btn:not(:disabled):hover { opacity: 0.85; }
+.merge-warning { color: #e74c3c; font-size: 0.8rem; }
+.continue-btn {
+    margin-left: auto;
+    padding: 0.5rem 1.5rem; font-size: 0.9rem; font-weight: 600;
+    border: none; border-radius: 6px; cursor: pointer;
+    background: #3498db; color: #fff; transition: background 0.2s;
+}
+.continue-btn:hover { background: #2980b9; }
+
+/* Day sections */
+.day-section { margin-bottom: 1.5rem; }
+.day-section summary.day-header {
+    cursor: pointer; font-size: 1.15rem; font-weight: 600;
+    padding: 0.5rem 0; border-bottom: 1px solid #333;
+}
+.day-header .event-count { color: #888; font-weight: 400; font-size: 0.85rem; }
+
+/* Event cards */
+.event-card {
+    margin: 0.75rem 0; padding: 0.75rem; background: #16213e;
+    border-radius: 8px; border-left: 4px solid #555;
+    transition: border-color 0.15s;
+}
+.event-card.selected { border-color: #2ecc71; }
+.event-card[data-type="landmark"] { border-left-color: #3498db; }
+.event-card[data-type="restaurant"] { border-left-color: #e67e22; }
+.event-card[data-type="hotel"] { border-left-color: #9b59b6; }
+.event-card[data-type="activity"] { border-left-color: #2ecc71; }
+.event-card[data-type="transit"] { border-left-color: #95a5a6; }
+.event-card[data-type="unknown"] { border-left-color: #555; }
+
+/* Event header row */
+.event-top {
+    display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 0.4rem;
+}
+.event-check { width: 18px; height: 18px; cursor: pointer; accent-color: #2ecc71; }
+.type-icon { font-size: 1.1rem; }
+.type-select {
+    padding: 0.2rem 0.4rem; font-size: 0.8rem; background: #0f3460;
+    color: #ddd; border: 1px solid #555; border-radius: 4px; cursor: pointer;
+}
+.event-name-input {
+    background: transparent; border: 1px solid transparent; color: #eee;
+    font-size: 1rem; font-weight: 600; padding: 0.15rem 0.4rem; border-radius: 4px;
+    flex: 1; min-width: 150px;
+}
+.event-name-input:hover { border-color: #444; }
+.event-name-input:focus { border-color: #2ecc71; outline: none; background: #0f3460; }
+.event-time { color: #888; font-size: 0.85rem; white-space: nowrap; }
+.photo-count-badge {
+    font-size: 0.75rem; background: #0f3460; padding: 0.15rem 0.5rem;
+    border-radius: 10px; color: #aaa;
+}
+.source-badges { display: flex; gap: 0.3rem; flex-wrap: wrap; }
+.source-badge {
+    font-size: 0.65rem; background: #333; padding: 0.1rem 0.4rem;
+    border-radius: 3px; color: #aaa; text-transform: lowercase;
+}
+.delete-btn {
+    padding: 0.2rem 0.5rem; font-size: 0.75rem; border: 1px solid #e74c3c;
+    background: transparent; color: #e74c3c; border-radius: 4px; cursor: pointer;
+    margin-left: 0.3rem;
+}
+.delete-btn:hover { background: #5c1a1a; }
+
+/* Photo grid */
+.photo-section { margin-top: 0.5rem; }
+.bulk-actions { display: flex; gap: 0.5rem; margin-bottom: 0.5rem; }
+.bulk-btn {
+    padding: 0.25rem 0.6rem; font-size: 0.75rem; border: 1px solid #555;
+    background: #0f3460; color: #ddd; border-radius: 4px; cursor: pointer;
+}
+.bulk-btn:hover { background: #1a4a8a; }
+.photo-grid { display: flex; flex-wrap: wrap; gap: 6px; }
+.photo-card {
+    position: relative; cursor: pointer; border-radius: 6px; overflow: hidden;
+    border: 3px solid transparent; transition: all 0.15s ease;
+}
+.photo-card img { display: block; width: 225px; height: 168px; object-fit: cover; }
+.photo-card.kept { border-color: #2ecc71; }
+.photo-card.removed { border-color: #e74c3c; opacity: 0.4; }
+.photo-card.removed::after {
+    content: "REMOVED"; position: absolute; top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    color: #e74c3c; font-weight: 700; font-size: 0.75rem;
+    background: rgba(0,0,0,0.7); padding: 0.2rem 0.5rem; border-radius: 3px;
+}
+.quality-badge {
+    position: absolute; bottom: 4px; left: 4px; font-size: 0.6rem; font-weight: 700;
+    padding: 0.1rem 0.3rem; border-radius: 3px; pointer-events: none;
+    background: rgba(0,0,0,0.7);
+}
+.quality-badge.q-good { color: #2ecc71; }
+.quality-badge.q-mid { color: #f1c40f; }
+.quality-badge.q-low { color: #e74c3c; }
+.status-badge {
+    position: absolute; top: 4px; right: 4px; font-size: 0.65rem; font-weight: 700;
+    padding: 0.1rem 0.3rem; border-radius: 3px; pointer-events: none;
+}
+.photo-card.kept .status-badge { background: #2ecc71; color: #000; }
+.photo-card.removed .status-badge { background: #e74c3c; color: #fff; }
+
+/* Description and notes textareas */
+.event-extras { margin-top: 0.5rem; display: flex; gap: 0.5rem; flex-wrap: wrap; }
+.desc-textarea, .note-textarea {
+    background: #0f3460; border: 1px solid #555; color: #ddd; font-size: 0.8rem;
+    padding: 0.3rem 0.5rem; border-radius: 4px; resize: vertical;
+    min-height: 2em; flex: 1; min-width: 200px; font-family: inherit;
+}
+.desc-textarea:focus, .note-textarea:focus { border-color: #2ecc71; outline: none; }
+.desc-textarea::placeholder, .note-textarea::placeholder { color: #666; }
+
+/* Merge dialog */
+.merge-prompt {
+    display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(0,0,0,0.7); z-index: 100;
+    justify-content: center; align-items: center;
+}
+.merge-prompt.active { display: flex; }
+.merge-dialog {
+    background: #16213e; border: 1px solid #444; border-radius: 12px;
+    padding: 1.5rem; max-width: 450px; width: 90%;
+}
+.merge-dialog h3 { margin-bottom: 0.75rem; color: #fff; }
+.merge-dialog input {
+    width: 100%; padding: 0.5rem; font-size: 1rem; background: #0f3460;
+    border: 1px solid #555; color: #eee; border-radius: 6px; margin-bottom: 1rem;
+}
+.merge-dialog input:focus { border-color: #2ecc71; outline: none; }
+.merge-dialog .btns { display: flex; gap: 0.5rem; justify-content: flex-end; }
+.merge-dialog .btn-confirm {
+    padding: 0.4rem 1.2rem; background: #2ecc71; color: #000; border: none;
+    border-radius: 6px; font-weight: 600; cursor: pointer;
+}
+.merge-dialog .btn-cancel {
+    padding: 0.4rem 1.2rem; background: #555; color: #eee; border: none;
+    border-radius: 6px; cursor: pointer;
+}
+{% endblock %}
+
+{% block content %}
+<div class="review-stats-bar">
+    <button class="merge-btn" id="merge-btn" disabled onclick="openMergePrompt()">Merge Selected (0)</button>
+    <span class="merge-warning" id="merge-warning"></span>
+    <span class="stat" id="stat-events">Events: <strong>0</strong></span>
+    <span class="stat" id="stat-photos">Photos: <strong>0</strong></span>
+    <span class="stat" id="stat-kept">Kept: <strong>0</strong></span>
+    <span class="stat" id="stat-removed">Removed: <strong>0</strong></span>
+    <button class="continue-btn" onclick="continueToNext()">Continue to Enrichment</button>
+</div>
+
+{% for day in trip.days %}
+{% set day_idx = loop.index0 %}
+<details class="day-section" open data-day-index="{{ day_idx }}">
+    <summary class="day-header">
+        {{ day.date.strftime("%A, %B %d") }}
+        <span class="event-count">({{ day.events | length }} events)</span>
+    </summary>
+
+    {% for event in day.events %}
+    <div class="event-card" data-event-id="{{ event.id }}" data-day-index="{{ day_idx }}" data-type="{{ event.type }}"
+         data-photo-count="{{ event.photos | length }}"
+         data-kept-count="{{ event.photos | selectattr('is_kept') | list | length }}">
+        <div class="event-top">
+            <input type="checkbox" class="event-check" data-event-id="{{ event.id }}" data-day-index="{{ day_idx }}" onchange="updateSelection()">
+            <span class="type-icon">{{ type_icons.get(event.type, "\u2753") }}</span>
+            <select class="type-select" data-event-id="{{ event.id }}" onchange="changeType(this)">
+                {% for t in ["landmark", "restaurant", "hotel", "activity", "transit", "unknown"] %}
+                <option value="{{ t }}" {% if t == event.type %}selected{% endif %}>{{ type_icons.get(t, "") }} {{ t }}</option>
+                {% endfor %}
+            </select>
+            <input type="text" class="event-name-input" value="{{ event.name }}"
+                   data-event-id="{{ event.id }}" data-original="{{ event.name }}"
+                   onblur="onRenameBlur(this)" onkeydown="if(event.key==='Enter')this.blur()">
+            <span class="event-time">{{ event.time_range[0].strftime("%H:%M") }} – {{ event.time_range[1].strftime("%H:%M") }}</span>
+            {% if event.photos %}
+            <span class="photo-count-badge">{{ event.photos | length }} photos</span>
+            {% endif %}
+            <span class="source-badges">
+                {% for src in event.sources %}<span class="source-badge">{{ src }}</span>{% endfor %}
+            </span>
+            <button class="delete-btn" onclick="deleteEvent('{{ event.id }}', {{ day_idx }})">Delete</button>
+        </div>
+
+        {% if event.photos %}
+        <div class="photo-section">
+            <div class="bulk-actions">
+                <button class="bulk-btn" onclick="bulkAction('{{ event.id }}', 'keep_all')">Keep All</button>
+                <button class="bulk-btn" onclick="bulkAction('{{ event.id }}', 'remove_all')">Remove All</button>
+            </div>
+            <div class="photo-grid">
+                {% for photo in event.photos %}
+                <div class="photo-card {{ 'kept' if photo.is_kept else 'removed' }}"
+                     data-event-id="{{ event.id }}" data-photo-index="{{ loop.index0 }}"
+                     data-kept="{{ photo.is_kept | lower }}"
+                     data-quality="{{ (photo.quality_score if photo.quality_score is not none else 0) | round | int }}"
+                     onclick="togglePhoto(this)">
+                    <img src="/photos/{{ event.id }}/{{ loop.index0 }}" loading="lazy" alt="Photo {{ loop.index0 + 1 }}">
+                    <span class="status-badge">{{ "KEEP" if photo.is_kept else "CUT" }}</span>
+                    {% if photo.quality_score is not none %}
+                    <span class="quality-badge {{ 'q-good' if photo.quality_score >= 70 else ('q-mid' if photo.quality_score >= 40 else 'q-low') }}">Q:{{ photo.quality_score | round | int }}</span>
+                    {% endif %}
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+        {% endif %}
+
+        <div class="event-extras">
+            <textarea class="desc-textarea" placeholder="Description..."
+                      data-event-id="{{ event.id }}"
+                      onblur="onDescriptionBlur(this)">{{ event.description }}</textarea>
+            <textarea class="note-textarea" placeholder="Notes..."
+                      data-event-id="{{ event.id }}"
+                      onblur="onNoteBlur(this)">{{ event.notes }}</textarea>
+        </div>
+    </div>
+    {% endfor %}
+</details>
+{% endfor %}
+
+<div class="merge-prompt" id="merge-prompt">
+    <div class="merge-dialog">
+        <h3>Merge Events</h3>
+        <p style="color:#aaa; margin-bottom:0.75rem; font-size:0.85rem;" id="merge-info"></p>
+        <input type="text" id="merge-name-input" placeholder="Name for merged event">
+        <div class="btns">
+            <button class="btn-cancel" onclick="closeMergePrompt()">Cancel</button>
+            <button class="btn-confirm" onclick="confirmMerge()">Merge</button>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+const TYPE_ICONS = {{ type_icons | tojson }};
+
+/* --- Global stats --- */
+function updateGlobalStats() {
+    const cards = document.querySelectorAll('.event-card');
+    let totalEvents = cards.length;
+    let totalPhotos = 0, keptPhotos = 0;
+    cards.forEach(c => {
+        const pc = parseInt(c.dataset.photoCount) || 0;
+        const kc = parseInt(c.dataset.keptCount) || 0;
+        totalPhotos += pc;
+        keptPhotos += kc;
+    });
+    document.getElementById('stat-events').innerHTML = 'Events: <strong>' + totalEvents + '</strong>';
+    document.getElementById('stat-photos').innerHTML = 'Photos: <strong>' + totalPhotos + '</strong>';
+    document.getElementById('stat-kept').innerHTML = 'Kept: <strong>' + keptPhotos + '</strong>';
+    document.getElementById('stat-removed').innerHTML = 'Removed: <strong>' + (totalPhotos - keptPhotos) + '</strong>';
+}
+
+/* --- Photo toggling --- */
+async function togglePhoto(card) {
+    const eventId = card.dataset.eventId;
+    const photoIndex = parseInt(card.dataset.photoIndex);
+    const resp = await fetch('/api/toggle-keep', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({event_id: eventId, photo_index: photoIndex})
+    });
+    const data = await resp.json();
+    card.dataset.kept = data.is_kept ? 'true' : 'false';
+    card.className = 'photo-card ' + (data.is_kept ? 'kept' : 'removed');
+    card.querySelector('.status-badge').textContent = data.is_kept ? 'KEEP' : 'CUT';
+    recalcEventCard(eventId);
+    updateGlobalStats();
+}
+
+async function bulkAction(eventId, action) {
+    const resp = await fetch('/api/bulk-action', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({event_id: eventId, action: action})
+    });
+    if (!resp.ok) return;
+    const isKept = (action === 'keep_all');
+    const cards = document.querySelectorAll('.photo-card[data-event-id="' + eventId + '"]');
+    cards.forEach(c => {
+        c.dataset.kept = isKept ? 'true' : 'false';
+        c.className = 'photo-card ' + (isKept ? 'kept' : 'removed');
+        c.querySelector('.status-badge').textContent = isKept ? 'KEEP' : 'CUT';
+    });
+    recalcEventCard(eventId);
+    updateGlobalStats();
+}
+
+function recalcEventCard(eventId) {
+    const eventCard = document.querySelector('.event-card[data-event-id="' + eventId + '"]');
+    if (!eventCard) return;
+    const photos = eventCard.querySelectorAll('.photo-card');
+    let kept = 0;
+    photos.forEach(p => { if (p.dataset.kept === 'true') kept++; });
+    eventCard.dataset.keptCount = kept;
+}
+
+/* --- Skeleton: rename --- */
+async function onRenameBlur(input) {
+    const eventId = input.dataset.eventId;
+    const newName = input.value.trim();
+    const original = input.dataset.original;
+    if (!newName || newName === original) { input.value = original; return; }
+    const resp = await fetch('/api/skeleton/rename', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({event_id: eventId, new_name: newName})
+    });
+    if (resp.ok) { input.dataset.original = newName; }
+    else { input.value = original; }
+}
+
+/* --- Skeleton: delete --- */
+async function deleteEvent(eventId, dayIndex) {
+    if (!confirm('Delete this event?')) return;
+    const resp = await fetch('/api/skeleton/delete', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({event_id: eventId, day_index: dayIndex})
+    });
+    if (!resp.ok) { alert('Delete failed'); return; }
+    const card = document.querySelector('.event-card[data-event-id="' + eventId + '"]');
+    if (card) card.remove();
+    const details = document.querySelector('details[data-day-index="' + dayIndex + '"]');
+    if (details) {
+        const remaining = details.querySelectorAll('.event-card').length;
+        const countSpan = details.querySelector('.event-count');
+        if (countSpan) countSpan.textContent = '(' + remaining + ' events)';
+    }
+    updateSelection();
+    updateGlobalStats();
+}
+
+/* --- Skeleton: change type --- */
+async function changeType(select) {
+    const eventId = select.dataset.eventId;
+    const newType = select.value;
+    const resp = await fetch('/api/skeleton/update-type', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({event_id: eventId, new_type: newType})
+    });
+    if (resp.ok) {
+        const card = select.closest('.event-card');
+        card.dataset.type = newType;
+        const iconSpan = card.querySelector('.type-icon');
+        iconSpan.textContent = TYPE_ICONS[newType] || '\u2753';
+    }
+}
+
+/* --- Notes and description --- */
+async function onNoteBlur(textarea) {
+    const eventId = textarea.dataset.eventId;
+    await fetch('/api/skeleton/add-note', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({event_id: eventId, note: textarea.value.trim()})
+    });
+}
+
+async function onDescriptionBlur(textarea) {
+    const eventId = textarea.dataset.eventId;
+    await fetch('/api/update-description', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({event_id: eventId, description: textarea.value.trim()})
+    });
+}
+
+/* --- Merge selection --- */
+function getSelected() {
+    return Array.from(document.querySelectorAll('.event-check:checked'));
+}
+
+function updateSelection() {
+    const checked = getSelected();
+    const btn = document.getElementById('merge-btn');
+    const warning = document.getElementById('merge-warning');
+    btn.textContent = 'Merge Selected (' + checked.length + ')';
+    warning.textContent = '';
+    if (checked.length < 2) { btn.disabled = true; return; }
+    const days = new Set(checked.map(c => c.dataset.dayIndex));
+    if (days.size > 1) {
+        btn.disabled = true;
+        warning.textContent = 'Select events from one day only';
+        return;
+    }
+    btn.disabled = false;
+    // Highlight selected cards
+    document.querySelectorAll('.event-card').forEach(c => c.classList.remove('selected'));
+    checked.forEach(c => {
+        const card = c.closest('.event-card');
+        if (card) card.classList.add('selected');
+    });
+}
+
+async function openMergePrompt() {
+    const checked = getSelected();
+    const eventIds = checked.map(c => c.dataset.eventId);
+    const resp = await fetch('/api/skeleton/suggest-merge-name', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({event_ids: eventIds})
+    });
+    const data = await resp.json();
+    document.getElementById('merge-info').textContent = 'Merging ' + eventIds.length + ' events';
+    document.getElementById('merge-name-input').value = data.suggested_name;
+    document.getElementById('merge-prompt').classList.add('active');
+    document.getElementById('merge-name-input').focus();
+    document.getElementById('merge-name-input').select();
+}
+
+function closeMergePrompt() {
+    document.getElementById('merge-prompt').classList.remove('active');
+}
+
+async function confirmMerge() {
+    const checked = getSelected();
+    const eventIds = checked.map(c => c.dataset.eventId);
+    const dayIndex = parseInt(checked[0].dataset.dayIndex);
+    const newName = document.getElementById('merge-name-input').value.trim();
+    if (!newName) return;
+    closeMergePrompt();
+    const resp = await fetch('/api/skeleton/merge', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({day_index: dayIndex, event_ids: eventIds, new_name: newName})
+    });
+    if (!resp.ok) { alert('Merge failed'); return; }
+    window.location.reload();
+}
+
+/* --- Continue to next step --- */
+async function continueToNext() {
+    const resp = await fetch('/api/stage/advance', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({})
+    });
+    if (resp.ok) {
+        const data = await resp.json();
+        window.location.href = '/wizard/' + data.next_step;
+    }
+}
+
+/* --- Keyboard shortcuts for merge dialog --- */
+document.addEventListener('keydown', e => {
+    if (e.key === 'Enter' && document.getElementById('merge-prompt').classList.contains('active')) {
+        confirmMerge();
+    } else if (e.key === 'Escape') {
+        closeMergePrompt();
+    }
+});
+
+/* --- Init --- */
+document.addEventListener('DOMContentLoaded', updateGlobalStats);
+</script>
+{% endblock %}

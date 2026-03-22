@@ -448,8 +448,27 @@ def create_app(session: SessionConfig) -> FastAPI:
         step = STAGE_TO_STEP.get(app.state.session.current_stage, "review")
         return JSONResponse({"stage": app.state.session.current_stage, "next_step": step})
 
+    TYPE_ICONS = {
+        "landmark": "\U0001f3db\ufe0f",
+        "restaurant": "\U0001f37d\ufe0f",
+        "hotel": "\U0001f3e8",
+        "activity": "\U0001f3af",
+        "transit": "\U0001f68c",
+        "unknown": "\u2753",
+    }
+
+    @app.get("/wizard/review", response_class=HTMLResponse)
+    def wizard_review():
+        if app.state.trip is None:
+            return RedirectResponse("/wizard/setup", status_code=307)
+        ctx = _get_wizard_context(app.state.session)
+        ctx["trip"] = app.state.trip
+        ctx["type_icons"] = TYPE_ICONS
+        template = env.get_template("review.html")
+        return HTMLResponse(template.render(**ctx))
+
     # Placeholder routes for remaining wizard steps
-    for step_name in ["review", "enrich", "highlights", "generate"]:
+    for step_name in ["enrich", "highlights", "generate"]:
         _register_placeholder_step(app, env, step_name)
 
     return app

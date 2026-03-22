@@ -221,6 +221,21 @@ def test_skeleton_rename(tmp_path):
     assert response.json()["new_name"] == "Renamed"
 
 
+def test_review_page_renders_with_trip(tmp_path):
+    session = create_session("test-trip", base_dir=tmp_path)
+    session.current_stage = "ingested"
+    session.save()
+    from post_trip_summary.server.app import create_app
+    app = create_app(session)
+    app.state.trip = _make_test_trip(tmp_path)
+    from post_trip_summary.server.app import _build_event_index
+    app.state.event_index = _build_event_index(app.state.trip)
+    client = TestClient(app)
+    response = client.get("/wizard/review")
+    assert response.status_code == 200
+    assert "day01-event01" in response.text
+
+
 def test_advance_stage(tmp_path):
     session = create_session("test-trip", base_dir=tmp_path)
     session.current_stage = "ingested"
