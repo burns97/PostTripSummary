@@ -53,7 +53,7 @@ def _normalize(values: list[float]) -> list[float]:
     return [100.0 * (v - lo) / (hi - lo) for v in values]
 
 
-def score_photos(photos: list[Photo], thumbnail_size: int = 512) -> None:
+def score_photos(photos: list[Photo], thumbnail_size: int = 512, progress_callback=None) -> None:
     """Score all photos in-place. Sets photo.quality_score (0-100)."""
     if not photos:
         return
@@ -64,6 +64,8 @@ def score_photos(photos: list[Photo], thumbnail_size: int = 512) -> None:
     valid_indices: list[int] = []
 
     for i, photo in enumerate(photos):
+        if progress_callback:
+            progress_callback("scoring", i + 1, len(photos), photo.path.name)
         try:
             img = Image.open(photo.path)
             img.thumbnail((thumbnail_size, thumbnail_size))

@@ -116,6 +116,7 @@ def build_skeleton(
     trip_data: dict,
     gap_minutes: int = 15,
     distance_meters: int = 200,
+    progress_callback=None,
 ) -> Trip:
     """Build a Trip skeleton from ingested data."""
     photos: list[Photo] = trip_data.get("photos", [])
@@ -155,7 +156,9 @@ def build_skeleton(
     # Build events from clusters
     events_by_date: dict[date, list[Event]] = defaultdict(list)
 
-    for cluster in clusters:
+    for idx, cluster in enumerate(clusters):
+        if progress_callback:
+            progress_callback("skeleton", idx + 1, len(clusters), f"Cluster {idx + 1}")
         c_date = cluster["time_range"][0].date()
         centroid = cluster["centroid"]
 

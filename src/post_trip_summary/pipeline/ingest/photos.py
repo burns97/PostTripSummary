@@ -110,7 +110,7 @@ def extract_photo_metadata(path: Path) -> Photo:
     return Photo(path=path, timestamp=timestamp or datetime.min, gps=gps)
 
 
-def ingest_photos(directory: Path) -> list[Photo]:
+def ingest_photos(directory: Path, progress_callback=None) -> list[Photo]:
     # Register HEIF/HEIC opener if available
     try:
         import pillow_heif
@@ -121,5 +121,9 @@ def ingest_photos(directory: Path) -> list[Photo]:
     paths = scan_photos(directory)
     if not paths:
         return []
-    photos = [extract_photo_metadata(p) for p in paths]
+    photos = []
+    for i, p in enumerate(paths):
+        photos.append(extract_photo_metadata(p))
+        if progress_callback:
+            progress_callback("scanning", i + 1, len(paths), p.name)
     return sorted(photos, key=lambda p: p.timestamp)
