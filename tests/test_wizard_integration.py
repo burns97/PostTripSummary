@@ -177,3 +177,64 @@ def test_review_flow(tmp_path):
 
     # 6. Session is now at stage "reviewed"
     assert session.current_stage == "reviewed"
+
+
+def test_enrich_estimate_returns_data(tmp_path):
+    """Integration test: reviewed stage -> GET /api/enrich/estimate returns cost data."""
+    from post_trip_summary.server.app import create_app, _build_event_index
+
+    session = create_session("enrich-estimate-trip", base_dir=tmp_path)
+    session.current_stage = "reviewed"
+    session.save()
+
+    app = create_app(session)
+    app.state.trip = _make_test_trip(tmp_path)
+    app.state.event_index = _build_event_index(app.state.trip)
+
+    client = TestClient(app)
+
+    response = client.get("/api/enrich/estimate")
+    assert response.status_code == 200
+    data = response.json()
+    assert "total_images" in data
+    assert "estimated_cost" in data
+    assert isinstance(data["total_images"], int)
+    assert isinstance(data["estimated_cost"], float)
+
+
+def test_highlights_flow(tmp_path):
+    """Integration test: enriched stage -> highlights page -> toggle highlight -> advance."""
+    from post_trip_summary.server.app import create_app, _build_event_index
+
+    session = create_session("highlights-flow-trip", base_dir=tmp_path)
+    session.current_stage = "enriched"
+    session.save()
+
+    app = create_app(session)
+    app.state.trip = _make_test_trip(tmp_path)
+    app.state.event_index = _build_event_index(app.state.trip)
+
+    client = TestClient(app)
+
+    # 1. Highlights page renders
+    response = client.get("/wizard/highlights")
+    assert response.status_code == 200
+
+    # 2. Toggle highlight on the first photo of the first event
+    response = client.post(
+        "/api/toggle-highlight",
+        json={"event_id": "day01-event01", "photo_index": 0},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert "is_highlight" in data
+    assert data["is_highlight"] is True  # starts False, toggled to True
+
+    # 3. Advance stage from "enriched" to "highlights_done"
+    response = client.post("/api/stage/advance")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["stage"] == "highlights_done"
+
+    # 4. Session reflects the new stage
+    assert session.current_stage == "highlights_done"
