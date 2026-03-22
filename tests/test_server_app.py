@@ -249,3 +249,36 @@ def test_advance_stage(tmp_path):
     response = client.post("/api/stage/advance")
     assert response.status_code == 200
     assert response.json()["stage"] == "reviewed"
+
+
+def test_enrich_estimate_endpoint(tmp_path):
+    session = create_session("test-trip", base_dir=tmp_path)
+    session.current_stage = "reviewed"
+    session.save()
+    from post_trip_summary.server.app import create_app, _build_event_index
+    app = create_app(session)
+    app.state.trip = _make_test_trip(tmp_path)
+    app.state.event_index = _build_event_index(app.state.trip)
+    client = TestClient(app)
+    response = client.get("/api/enrich/estimate")
+    assert response.status_code == 200
+    data = response.json()
+    assert "total_images" in data
+    assert "estimated_cost" in data
+    assert "provider" in data
+    assert "has_api_key" in data
+    assert "event_count" in data
+
+
+def test_enrich_page_renders(tmp_path):
+    session = create_session("test-trip", base_dir=tmp_path)
+    session.current_stage = "reviewed"
+    session.save()
+    from post_trip_summary.server.app import create_app, _build_event_index
+    app = create_app(session)
+    app.state.trip = _make_test_trip(tmp_path)
+    app.state.event_index = _build_event_index(app.state.trip)
+    client = TestClient(app)
+    response = client.get("/wizard/enrich")
+    assert response.status_code == 200
+    assert "Enrichment" in response.text or "enrich" in response.text.lower()

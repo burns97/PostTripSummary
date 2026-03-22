@@ -1,0 +1,221 @@
+{% extends "wizard.html" %}
+{% block title %}{{ stage_title }}{% endblock %}
+
+{% block extra_css %}
+.enrich-container { max-width: 600px; margin: 3rem auto; text-align: center; }
+.cost-card { background: #16213e; border-radius: 12px; padding: 2rem; margin-bottom: 2rem; }
+.cost-card h2 { color: #fff; font-size: 1.3rem; margin-bottom: 1rem; }
+.cost-detail { display: flex; justify-content: space-between; padding: 0.5rem 0; border-bottom: 1px solid #0f3460; color: #ccc; font-size: 0.95rem; }
+.cost-detail:last-child { border-bottom: none; }
+.cost-detail .label { color: #aaa; }
+.cost-detail .value { color: #fff; font-weight: 500; }
+.cost-total { font-size: 1.2rem; margin-top: 1rem; color: #2ecc71; }
+.cost-free { color: #2ecc71; }
+.cost-warn { color: #f39c12; }
+
+.btn-group { display: flex; gap: 1rem; justify-content: center; margin-top: 1.5rem; flex-wrap: wrap; }
+.btn-approve { padding: 0.7em 2em; background: #2ecc71; color: #1a1a2e; border: none; border-radius: 4px; font-size: 1em; cursor: pointer; font-weight: bold; }
+.btn-approve:hover { background: #27ae60; }
+.btn-reduce { padding: 0.7em 2em; background: #f39c12; color: #1a1a2e; border: none; border-radius: 4px; font-size: 1em; cursor: pointer; font-weight: bold; }
+.btn-reduce:hover { background: #e67e22; }
+.btn-skip { padding: 0.7em 2em; background: #555; color: #e0e0e0; border: none; border-radius: 4px; font-size: 1em; cursor: pointer; }
+.btn-skip:hover { background: #666; }
+
+.no-key-warning { background: #2c1810; border: 1px solid #f39c12; border-radius: 8px; padding: 1rem; margin-bottom: 1.5rem; color: #f39c12; font-size: 0.9rem; }
+
+.loading-spinner { color: #aaa; font-size: 0.95rem; padding: 2rem; }
+
+/* Progress card (reused from progress.html) */
+.progress-card { background: #16213e; border-radius: 12px; padding: 2rem; display: none; }
+.stage-title { font-size: 1.3rem; margin-bottom: 0.5rem; color: #fff; }
+.stage-phase { font-size: 0.95rem; color: #aaa; margin-bottom: 1.5rem; min-height: 1.4em; }
+.progress-bar-track { background: #0f3460; border-radius: 8px; height: 8px; margin: 1rem 0; overflow: hidden; }
+.progress-bar-fill { background: #2ecc71; height: 100%; border-radius: 8px; transition: width 0.3s ease; width: 0%; }
+.progress-bar-fill.indeterminate { width: 30%; animation: slide 1.5s infinite ease-in-out; }
+@keyframes slide { 0% { transform: translateX(-100%); } 100% { transform: translateX(400%); } }
+.progress-label { color: #aaa; font-size: 0.9rem; margin-top: 0.5rem; min-height: 1.5em; }
+.progress-stats { color: #888; font-size: 0.85rem; margin-top: 1rem; }
+.error-message { color: #e74c3c; margin-top: 1rem; }
+{% endblock %}
+
+{% block content %}
+<div class="enrich-container">
+  <!-- Cost gate -->
+  <div class="cost-card" id="cost-gate">
+    <h2>Vision Enrichment</h2>
+    <div class="loading-spinner" id="cost-loading">Loading estimate...</div>
+    <div id="cost-details" style="display: none;">
+      <div class="cost-detail">
+        <span class="label">Provider</span>
+        <span class="value" id="est-provider">--</span>
+      </div>
+      <div class="cost-detail">
+        <span class="label">Model</span>
+        <span class="value" id="est-model">--</span>
+      </div>
+      <div class="cost-detail">
+        <span class="label">Events</span>
+        <span class="value" id="est-events">--</span>
+      </div>
+      <div class="cost-detail">
+        <span class="label">Images (full)</span>
+        <span class="value" id="est-total">--</span>
+      </div>
+      <div class="cost-detail">
+        <span class="label">Images (reduced)</span>
+        <span class="value" id="est-reduced">--</span>
+      </div>
+      <div class="cost-total" id="est-cost"></div>
+
+      <div class="no-key-warning" id="no-key-warning" style="display: none;">
+        No API key configured. Set GOOGLE_API_KEY or ANTHROPIC_API_KEY to enable vision enrichment.
+      </div>
+
+      <div class="btn-group" id="btn-group">
+        <button class="btn-approve" id="btn-approve" onclick="startEnrich('full')">Approve</button>
+        <button class="btn-reduce" id="btn-reduce" onclick="startEnrich('reduced')">Reduce Scope</button>
+        <button class="btn-skip" id="btn-skip" onclick="startEnrich('skip')">Skip</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Progress (shown after approval) -->
+  <div class="progress-card" id="progress-card">
+    <div class="stage-title">Vision Enrichment</div>
+    <div class="stage-phase" id="stage-phase">Starting...</div>
+    <div class="progress-bar-track">
+      <div class="progress-bar-fill indeterminate" id="progress-bar"></div>
+    </div>
+    <div class="progress-label" id="progress-label">Starting...</div>
+    <div class="progress-stats" id="progress-stats"></div>
+    <div class="error-message" id="error-message" style="display: none;"></div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+const phaseLabels = {
+  analyzing: "Analyzing Photos",
+  synthesizing: "Synthesizing Descriptions",
+  done: "Complete",
+};
+
+let startTime;
+
+// Fetch cost estimate on load
+fetch("/api/enrich/estimate")
+  .then(r => r.json())
+  .then(data => {
+    document.getElementById("cost-loading").style.display = "none";
+    document.getElementById("cost-details").style.display = "block";
+    document.getElementById("est-provider").textContent = data.provider;
+    document.getElementById("est-model").textContent = data.model || "(default)";
+    document.getElementById("est-events").textContent = data.event_count;
+    document.getElementById("est-total").textContent = data.total_images;
+    document.getElementById("est-reduced").textContent = data.reduced_images;
+
+    if (data.estimated_cost === 0) {
+      document.getElementById("est-cost").innerHTML = '<span class="cost-free">Estimated cost: Free (free tier)</span>';
+    } else {
+      document.getElementById("est-cost").innerHTML = 'Estimated cost: <span class="cost-warn">$' + data.estimated_cost.toFixed(2) + '</span>';
+    }
+
+    if (!data.has_api_key) {
+      document.getElementById("no-key-warning").style.display = "block";
+      document.getElementById("btn-approve").style.display = "none";
+      document.getElementById("btn-reduce").style.display = "none";
+    }
+  })
+  .catch(err => {
+    document.getElementById("cost-loading").textContent = "Failed to load estimate: " + err.message;
+  });
+
+function startEnrich(mode) {
+  // Hide cost gate, show progress
+  document.getElementById("cost-gate").style.display = "none";
+  document.getElementById("progress-card").style.display = "block";
+  startTime = Date.now();
+
+  if (mode === "skip") {
+    document.getElementById("stage-phase").textContent = "Selecting highlights...";
+  }
+
+  fetch("/api/stage/start", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({stage: "enrich", mode: mode})
+  }).then(resp => {
+    if (resp.ok) { connectSSE(); }
+    else { resp.json().then(d => {
+      document.getElementById("error-message").textContent = d.detail || "Failed to start";
+      document.getElementById("error-message").style.display = "block";
+    }); }
+  }).catch(err => {
+    document.getElementById("error-message").textContent = "Network error: " + err.message;
+    document.getElementById("error-message").style.display = "block";
+  });
+}
+
+function connectSSE() {
+  const source = new EventSource("/api/progress");
+  const bar = document.getElementById("progress-bar");
+  const label = document.getElementById("progress-label");
+  const stats = document.getElementById("progress-stats");
+  const phase = document.getElementById("stage-phase");
+  const errorEl = document.getElementById("error-message");
+
+  source.addEventListener("state", function(e) {
+    const state = JSON.parse(e.data);
+
+    if (state.done) {
+      source.close();
+      bar.classList.remove("indeterminate");
+      bar.style.width = "100%";
+      phase.textContent = "Complete!";
+      label.textContent = "Redirecting...";
+      setTimeout(() => { window.location.href = "/wizard/" + (state.next_stage || "highlights"); }, 1000);
+      return;
+    }
+
+    if (state.failed) {
+      source.close();
+      bar.classList.remove("indeterminate");
+      bar.style.width = "0%";
+      bar.style.background = "#e74c3c";
+      phase.textContent = "Failed";
+      label.textContent = "";
+      errorEl.textContent = state.error;
+      errorEl.style.display = "block";
+      return;
+    }
+
+    if (state.phase) {
+      phase.textContent = phaseLabels[state.phase] || state.phase;
+    }
+
+    const elapsed = Math.round((Date.now() - startTime) / 1000);
+    const mins = Math.floor(elapsed / 60);
+    const secs = elapsed % 60;
+    const timeStr = mins > 0 ? mins + "m " + secs + "s" : secs + "s";
+
+    if (state.total > 0) {
+      const pct = Math.round((state.current / state.total) * 100);
+      bar.classList.remove("indeterminate");
+      bar.style.width = pct + "%";
+      stats.textContent = state.current + " / " + state.total + "  (" + timeStr + " elapsed)";
+    } else {
+      bar.classList.add("indeterminate");
+      stats.textContent = timeStr + " elapsed";
+    }
+
+    label.textContent = state.label || "";
+  });
+
+  source.onerror = function() {
+    source.close();
+    setTimeout(connectSSE, 2000);
+  };
+}
+</script>
+{% endblock %}
