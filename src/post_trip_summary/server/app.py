@@ -11,6 +11,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Resp
 from sse_starlette.sse import EventSourceResponse
 
 from post_trip_summary.config import SessionConfig, STAGES
+from post_trip_summary.output.detailed_record import _format_time_filter, _photo_url_filter
 from post_trip_summary.serialization import load_trip
 from post_trip_summary.server.progress import ProgressTracker
 from post_trip_summary.settings import get_vision_settings
@@ -125,6 +126,8 @@ def create_app(session: SessionConfig) -> FastAPI:
         loader=jinja2.PackageLoader("post_trip_summary", "templates"),
         autoescape=True,
     )
+    env.filters["ftime"] = _format_time_filter
+    env.filters["photo_url"] = _photo_url_filter
 
     @app.get("/api/stage/current")
     def get_current_stage():
@@ -293,6 +296,29 @@ def create_app(session: SessionConfig) -> FastAPI:
             app.state.background_task = asyncio.create_task(_run_enrich())
             return JSONResponse({"status": "started"})
 
+        elif stage == "synthesize":
+            tracker = ProgressTracker()
+            app.state.progress = tracker
+
+            async def _run_synthesize():
+                try:
+                    from post_trip_summary.server.compute import run_synthesis_pipeline
+                    trip = await asyncio.to_thread(
+                        run_synthesis_pipeline, app.state.session, tracker.callback()
+                    )
+                    app.state.trip = trip
+                    app.state.event_index = _build_event_index(trip)
+                    app.state.session.current_stage = "highlights_done"
+                    app.state.session.save()
+                    tracker.complete("generate")
+                except Exception as e:
+                    tracker.fail(str(e))
+                finally:
+                    app.state.background_task = None
+
+            app.state.background_task = asyncio.create_task(_run_synthesize())
+            return JSONResponse({"status": "started"})
+
         else:
             raise HTTPException(400, f"Unknown stage: {stage}")
 
@@ -329,13 +355,21 @@ def create_app(session: SessionConfig) -> FastAPI:
         return template.render(**ctx)
 
     def _save_trip():
-        """Persist current trip state."""
+        """Persist current trip state to the appropriate stage file."""
         from post_trip_summary.serialization import save_trip as _save
         stage = app.state.session.current_stage
-        if stage in ("ingested", "reviewed"):
-            _save(app.state.trip, app.state.session.stage_file("reviewed"))
-        else:
-            _save(app.state.trip, app.state.session.stage_file(stage))
+        # Map stages to the file they should save to
+        save_targets = {
+            "ingested": "reviewed",
+            "reviewed": "reviewed",
+            "enriched": "enriched",
+            "highlights_done": "highlights_done",
+        }
+        target = save_targets.get(stage, stage)
+        try:
+            _save(app.state.trip, app.state.session.stage_file(target))
+        except ValueError:
+            pass  # Stages like "new" or "setup" have no file
 
     def _rebuild_index():
         """Rebuild event index and clear thumbnail cache after structural changes."""
@@ -579,29 +613,130 @@ def create_app(session: SessionConfig) -> FastAPI:
         template = env.get_template("highlights.html")
         return HTMLResponse(template.render(**ctx))
 
-    # Placeholder routes for remaining wizard steps
-    for step_name in ["generate"]:
-        _register_placeholder_step(app, env, step_name)
+    # --- Generate page and API ---
+
+    @app.get("/wizard/generate", response_class=HTMLResponse)
+    def wizard_generate():
+        if app.state.trip is None:
+            return RedirectResponse("/wizard/setup", status_code=307)
+        ctx = _get_wizard_context(app.state.session)
+        ctx["output_dir"] = str(app.state.session.output_dir)
+        template = env.get_template("generate.html")
+        return HTMLResponse(template.render(**ctx))
+
+    @app.post("/api/generate")
+    async def api_generate(request: Request):
+        if app.state.trip is None:
+            raise HTTPException(400, "No trip loaded")
+
+        body = await request.json()
+        trip = app.state.trip
+        session = app.state.session
+        output_dir = session.output_dir
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        files = []
+
+        if body.get("photo_prep"):
+            from post_trip_summary.output.photo_prep import prepare_photos
+            prepare_photos(trip, output_dir)
+            files.append({
+                "type": "photo_prep",
+                "path": str(output_dir / "photos"),
+            })
+
+        if body.get("detailed_record"):
+            from post_trip_summary.output.detailed_record import generate_detailed_record
+            out = output_dir / "detailed-record.html"
+            generate_detailed_record(trip, out)
+            files.append({
+                "type": "detailed_record",
+                "path": str(out),
+                "preview_url": "/detailed",
+            })
+
+        # Generate route map for the PDF
+        map_image = _generate_static_map(trip, output_dir)
+
+        if body.get("shareable_pdf"):
+            from post_trip_summary.output.shareable_pdf import generate_shareable_pdf
+            out = output_dir / "shareable-summary.pdf"
+            generate_shareable_pdf(trip, out, map_image=map_image)
+            files.append({
+                "type": "shareable_pdf",
+                "path": str(out),
+                "preview_url": "/summary",
+            })
+
+        if body.get("blog_post"):
+            from post_trip_summary.output.blog_post import generate_blog_post
+            out = output_dir / "blog-post.html"
+            generate_blog_post(trip, out)
+            files.append({
+                "type": "blog_post",
+                "path": str(out),
+                "preview_url": "/blog",
+            })
+
+        session.current_stage = "generated"
+        session.save()
+
+        return JSONResponse({
+            "status": "ok",
+            "files": files,
+            "output_dir": str(output_dir),
+        })
+
+    # --- Output preview endpoints ---
+
+    @app.get("/detailed", response_class=HTMLResponse)
+    def preview_detailed():
+        if app.state.trip is None:
+            raise HTTPException(404, "No trip loaded")
+        template = env.get_template("detailed_record.html")
+        return HTMLResponse(template.render(trip=app.state.trip))
+
+    @app.get("/summary", response_class=HTMLResponse)
+    def preview_summary():
+        if app.state.trip is None:
+            raise HTTPException(404, "No trip loaded")
+        from post_trip_summary.output.shareable_pdf import select_highlights, compute_stats
+        template = env.get_template("shareable_summary.html")
+        return HTMLResponse(template.render(
+            trip=app.state.trip,
+            highlights=select_highlights(app.state.trip),
+            stats=compute_stats(app.state.trip),
+            map_image=None,
+        ))
+
+    @app.get("/blog", response_class=HTMLResponse)
+    def preview_blog():
+        if app.state.trip is None:
+            raise HTTPException(404, "No trip loaded")
+        from post_trip_summary.output.shareable_pdf import select_highlights
+        template = env.get_template("blog_post.html")
+        return HTMLResponse(template.render(
+            trip=app.state.trip,
+            highlights=select_highlights(app.state.trip),
+        ))
 
     return app
 
 
-def _register_placeholder_step(app: FastAPI, env: jinja2.Environment, step_name: str):
-    """Register a placeholder wizard step route."""
-    template_str = (
-        '{% extends "wizard.html" %}\n'
-        "{% block content %}"
-        "<h1>" + step_name.title() + "</h1>"
-        "<p>This step is not yet implemented.</p>"
-        "{% endblock %}"
-    )
-    # Store the template string and step name in a closure — avoid passing
-    # Jinja2 Template objects as default args (FastAPI deepcopy breaks them)
-    _tpl_str = template_str
-    _name = step_name
-
-    @app.get(f"/wizard/{step_name}", name=f"wizard_{step_name}")
-    def wizard_placeholder():
-        compiled = env.from_string(_tpl_str)
-        ctx = _get_wizard_context(app.state.session)
-        return HTMLResponse(compiled.render(**ctx))
+def _generate_static_map(trip, output_dir) -> str | None:
+    """Generate a static map image showing major stops. Returns relative path or None."""
+    try:
+        from staticmap import StaticMap, CircleMarker
+        m = StaticMap(800, 400)
+        for day in trip.days:
+            for event in day.events:
+                if event.location.lat and event.location.lon:
+                    m.add_marker(CircleMarker((event.location.lon, event.location.lat), "#e74c3c", 8))
+        if m.markers:
+            map_path = output_dir / "route-map.png"
+            image = m.render()
+            image.save(str(map_path))
+            return "route-map.png"
+    except Exception:
+        pass
+    return None

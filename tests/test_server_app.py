@@ -362,3 +362,117 @@ def test_highlights_page_renders(tmp_path):
     response = client.get("/wizard/highlights")
     assert response.status_code == 200
     assert "day01-event01" in response.text
+
+
+def test_generate_page_renders(tmp_path):
+    session = create_session("test-trip", base_dir=tmp_path)
+    session.current_stage = "highlights_done"
+    session.save()
+    from post_trip_summary.server.app import create_app
+    app = create_app(session)
+    app.state.trip = _make_test_trip(tmp_path)
+    from post_trip_summary.server.app import _build_event_index
+    app.state.event_index = _build_event_index(app.state.trip)
+    client = TestClient(app)
+    response = client.get("/wizard/generate")
+    assert response.status_code == 200
+    assert "Generate" in response.text
+
+
+def test_generate_api(tmp_path):
+    session = create_session("test-trip", base_dir=tmp_path)
+    session.current_stage = "highlights_done"
+    session.save()
+    from post_trip_summary.server.app import create_app
+    app = create_app(session)
+    app.state.trip = _make_test_trip(tmp_path)
+    from post_trip_summary.server.app import _build_event_index
+    app.state.event_index = _build_event_index(app.state.trip)
+    client = TestClient(app)
+    response = client.post("/api/generate", json={
+        "detailed_record": True,
+        "shareable_pdf": False,
+        "blog_post": False,
+        "photo_prep": False,
+    })
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "ok"
+    assert any(f["type"] == "detailed_record" for f in data["files"])
+    assert session.current_stage == "generated"
+
+
+def test_generate_api_blog_post(tmp_path):
+    session = create_session("test-trip", base_dir=tmp_path)
+    session.current_stage = "highlights_done"
+    session.save()
+    from post_trip_summary.server.app import create_app
+    app = create_app(session)
+    app.state.trip = _make_test_trip(tmp_path)
+    from post_trip_summary.server.app import _build_event_index
+    app.state.event_index = _build_event_index(app.state.trip)
+    client = TestClient(app)
+    response = client.post("/api/generate", json={
+        "detailed_record": False,
+        "shareable_pdf": False,
+        "blog_post": True,
+        "photo_prep": False,
+    })
+    assert response.status_code == 200
+    data = response.json()
+    assert any(f["type"] == "blog_post" for f in data["files"])
+
+
+def test_generate_api_no_trip(tmp_path):
+    session = create_session("test-trip", base_dir=tmp_path)
+    session.current_stage = "highlights_done"
+    session.save()
+    from post_trip_summary.server.app import create_app
+    app = create_app(session)
+    # trip is None
+    client = TestClient(app)
+    response = client.post("/api/generate", json={"detailed_record": True})
+    assert response.status_code == 400
+
+
+def test_preview_detailed_endpoint(tmp_path):
+    session = create_session("test-trip", base_dir=tmp_path)
+    session.current_stage = "highlights_done"
+    session.save()
+    from post_trip_summary.server.app import create_app
+    app = create_app(session)
+    app.state.trip = _make_test_trip(tmp_path)
+    from post_trip_summary.server.app import _build_event_index
+    app.state.event_index = _build_event_index(app.state.trip)
+    client = TestClient(app)
+    response = client.get("/detailed")
+    assert response.status_code == 200
+    assert "Test" in response.text
+
+
+def test_preview_summary_endpoint(tmp_path):
+    session = create_session("test-trip", base_dir=tmp_path)
+    session.current_stage = "highlights_done"
+    session.save()
+    from post_trip_summary.server.app import create_app
+    app = create_app(session)
+    app.state.trip = _make_test_trip(tmp_path)
+    from post_trip_summary.server.app import _build_event_index
+    app.state.event_index = _build_event_index(app.state.trip)
+    client = TestClient(app)
+    response = client.get("/summary")
+    assert response.status_code == 200
+
+
+def test_preview_blog_endpoint(tmp_path):
+    session = create_session("test-trip", base_dir=tmp_path)
+    session.current_stage = "highlights_done"
+    session.save()
+    from post_trip_summary.server.app import create_app
+    app = create_app(session)
+    app.state.trip = _make_test_trip(tmp_path)
+    from post_trip_summary.server.app import _build_event_index
+    app.state.event_index = _build_event_index(app.state.trip)
+    client = TestClient(app)
+    response = client.get("/blog")
+    assert response.status_code == 200
