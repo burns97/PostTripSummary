@@ -1,0 +1,267 @@
+{% extends "wizard.html" %}
+
+{% block title %}{{ trip.name }} — Highlights{% endblock %}
+
+{% block extra_css %}
+/* Sticky stats bar */
+.hl-stats-bar {
+    position: sticky; top: 0; z-index: 30;
+    background: #1a1a2e; border-bottom: 1px solid #333;
+    padding: 0.6rem 1rem; margin: -2em -2em 1.5rem -2em;
+    display: flex; align-items: center; gap: 1.2rem; flex-wrap: wrap;
+}
+.hl-stats-bar .stat { font-size: 0.9rem; color: #aaa; }
+.hl-stats-bar .stat strong { color: #e0e0e0; }
+.continue-btn {
+    margin-left: auto;
+    padding: 0.5rem 1.5rem; font-size: 0.9rem; font-weight: 600;
+    border: none; border-radius: 6px; cursor: pointer;
+    background: #3498db; color: #fff; transition: background 0.2s;
+}
+.continue-btn:hover { background: #2980b9; }
+
+/* Day sections */
+.day-section { margin-bottom: 1.5rem; }
+.day-section summary.day-header {
+    cursor: pointer; font-size: 1.15rem; font-weight: 600;
+    padding: 0.5rem 0; border-bottom: 1px solid #333;
+}
+.day-header .event-count { color: #888; font-weight: 400; font-size: 0.85rem; }
+
+/* Event cards */
+.event-card {
+    margin: 0.75rem 0; padding: 0.75rem; background: #16213e;
+    border-radius: 8px; border-left: 4px solid #555;
+}
+.event-card[data-type="landmark"] { border-left-color: #3498db; }
+.event-card[data-type="restaurant"] { border-left-color: #e67e22; }
+.event-card[data-type="hotel"] { border-left-color: #9b59b6; }
+.event-card[data-type="activity"] { border-left-color: #2ecc71; }
+.event-card[data-type="transit"] { border-left-color: #95a5a6; }
+.event-card[data-type="unknown"] { border-left-color: #555; }
+
+/* Event header row */
+.event-top {
+    display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 0.4rem;
+}
+.type-icon { font-size: 1.1rem; }
+.event-name {
+    color: #eee; font-size: 1rem; font-weight: 600; flex: 1; min-width: 150px;
+}
+.event-time { color: #888; font-size: 0.85rem; white-space: nowrap; }
+.hl-count-badge {
+    font-size: 0.75rem; background: #0f3460; padding: 0.15rem 0.5rem;
+    border-radius: 10px; color: #aaa;
+}
+
+/* Photo grid */
+.photo-section { margin-top: 0.5rem; }
+.bulk-actions { display: flex; gap: 0.5rem; margin-bottom: 0.5rem; }
+.bulk-btn {
+    padding: 0.25rem 0.6rem; font-size: 0.75rem; border: 1px solid #555;
+    background: #0f3460; color: #ddd; border-radius: 4px; cursor: pointer;
+}
+.bulk-btn:hover { background: #1a4a8a; }
+.photo-grid { display: flex; flex-wrap: wrap; gap: 6px; }
+
+/* Photo card base */
+.photo-card {
+    position: relative; cursor: pointer; border-radius: 6px; overflow: hidden;
+    border: 3px solid transparent; transition: all 0.15s ease;
+    opacity: 0.5;
+}
+.photo-card:hover { opacity: 0.8; }
+.photo-card img { display: block; width: 225px; height: 168px; object-fit: cover; }
+
+/* Highlighted photo */
+.photo-card.highlighted {
+    border-color: #f1c40f;
+    box-shadow: 0 0 10px rgba(241, 196, 15, 0.5);
+    opacity: 1;
+}
+
+/* AI description tooltip overlay */
+.photo-card .ai-tooltip {
+    position: absolute; bottom: 0; left: 0; right: 0;
+    background: rgba(0, 0, 0, 0.85); color: #eee;
+    font-size: 0.7rem; line-height: 1.3; padding: 0.4rem;
+    opacity: 0; transition: opacity 0.2s; pointer-events: none;
+    max-height: 80%; overflow: hidden;
+}
+.photo-card:hover .ai-tooltip { opacity: 1; }
+
+/* Highlight badge */
+.hl-badge {
+    position: absolute; top: 4px; right: 4px; font-size: 0.65rem; font-weight: 700;
+    padding: 0.1rem 0.3rem; border-radius: 3px; pointer-events: none;
+    background: #f1c40f; color: #000; display: none;
+}
+.photo-card.highlighted .hl-badge { display: block; }
+
+/* Description and notes textareas */
+.event-extras { margin-top: 0.5rem; display: flex; gap: 0.5rem; flex-wrap: wrap; }
+.desc-textarea, .note-textarea {
+    background: #0f3460; border: 1px solid #555; color: #ddd; font-size: 0.8rem;
+    padding: 0.3rem 0.5rem; border-radius: 4px; resize: vertical;
+    min-height: 2em; flex: 1; min-width: 200px; font-family: inherit;
+}
+.desc-textarea:focus, .note-textarea:focus { border-color: #f1c40f; outline: none; }
+.desc-textarea::placeholder, .note-textarea::placeholder { color: #666; }
+{% endblock %}
+
+{% block content %}
+<div class="hl-stats-bar">
+    <span class="stat" id="stat-highlighted">Highlighted: <strong>0</strong></span>
+    <span class="stat" id="stat-kept">of <strong>0</strong> kept</span>
+    <button class="continue-btn" onclick="continueToNext()">Continue to Generate</button>
+</div>
+
+{% for day in trip.days %}
+{% set day_idx = loop.index0 %}
+<details class="day-section" open data-day-index="{{ day_idx }}">
+    <summary class="day-header">
+        {{ day.date.strftime("%A, %B %d") }}
+        <span class="event-count">({{ day.events | length }} events)</span>
+    </summary>
+
+    {% for event in day.events %}
+    {% set kept_photos = event.photos | selectattr('is_kept') | list %}
+    {% if kept_photos %}
+    <div class="event-card" data-event-id="{{ event.id }}" data-day-index="{{ day_idx }}" data-type="{{ event.type }}">
+        <div class="event-top">
+            <span class="type-icon">{{ type_icons.get(event.type, "\u2753") }}</span>
+            <span class="event-name">{{ event.name }}</span>
+            <span class="event-time">{{ event.time_range[0].strftime("%H:%M") }} – {{ event.time_range[1].strftime("%H:%M") }}</span>
+            <span class="hl-count-badge" data-event-id="{{ event.id }}">
+                {{ kept_photos | selectattr('is_highlight') | list | length }} / {{ kept_photos | length }} highlighted
+            </span>
+        </div>
+
+        <div class="photo-section">
+            <div class="bulk-actions">
+                <button class="bulk-btn" onclick="bulkHighlight('{{ event.id }}', 'highlight_all')">Highlight All</button>
+                <button class="bulk-btn" onclick="bulkHighlight('{{ event.id }}', 'highlight_none')">Clear Highlights</button>
+            </div>
+            <div class="photo-grid">
+                {% for photo in event.photos %}
+                {% if photo.is_kept %}
+                <div class="photo-card {{ 'highlighted' if photo.is_highlight else '' }}"
+                     data-event-id="{{ event.id }}" data-photo-index="{{ loop.index0 }}"
+                     data-highlight="{{ photo.is_highlight | lower }}"
+                     onclick="toggleHighlight(this)">
+                    <img src="/photos/{{ event.id }}/{{ loop.index0 }}" loading="lazy" alt="Photo {{ loop.index0 + 1 }}">
+                    <span class="hl-badge">&#9733;</span>
+                    {% if photo.ai_description %}
+                    <div class="ai-tooltip">{{ photo.ai_description }}</div>
+                    {% endif %}
+                </div>
+                {% endif %}
+                {% endfor %}
+            </div>
+        </div>
+
+        <div class="event-extras">
+            <textarea class="desc-textarea" placeholder="Description..."
+                      data-event-id="{{ event.id }}"
+                      onblur="onDescriptionBlur(this)">{{ event.description }}</textarea>
+            <textarea class="note-textarea" placeholder="Notes..."
+                      data-event-id="{{ event.id }}"
+                      onblur="onNoteBlur(this)">{{ event.notes }}</textarea>
+        </div>
+    </div>
+    {% endif %}
+    {% endfor %}
+</details>
+{% endfor %}
+{% endblock %}
+
+{% block extra_js %}
+<script>
+/* --- Global stats --- */
+function updateGlobalStats() {
+    const allCards = document.querySelectorAll('.photo-card');
+    let totalKept = allCards.length;
+    let totalHighlighted = 0;
+    allCards.forEach(c => {
+        if (c.dataset.highlight === 'true') totalHighlighted++;
+    });
+    document.getElementById('stat-highlighted').innerHTML = 'Highlighted: <strong>' + totalHighlighted + '</strong>';
+    document.getElementById('stat-kept').innerHTML = 'of <strong>' + totalKept + '</strong> kept';
+}
+
+/* --- Toggle highlight --- */
+async function toggleHighlight(card) {
+    const eventId = card.dataset.eventId;
+    const photoIndex = parseInt(card.dataset.photoIndex);
+    const resp = await fetch('/api/toggle-highlight', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({event_id: eventId, photo_index: photoIndex})
+    });
+    if (!resp.ok) return;
+    const data = await resp.json();
+    card.dataset.highlight = data.is_highlight ? 'true' : 'false';
+    card.className = 'photo-card' + (data.is_highlight ? ' highlighted' : '');
+    updateEventBadge(eventId, data.highlighted_count, data.kept_count);
+    updateGlobalStats();
+}
+
+/* --- Bulk highlight --- */
+async function bulkHighlight(eventId, action) {
+    const resp = await fetch('/api/bulk-action', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({event_id: eventId, action: action})
+    });
+    if (!resp.ok) return;
+    const isHighlight = (action === 'highlight_all');
+    const cards = document.querySelectorAll('.photo-card[data-event-id="' + eventId + '"]');
+    let highlighted = 0;
+    cards.forEach(c => {
+        c.dataset.highlight = isHighlight ? 'true' : 'false';
+        c.className = 'photo-card' + (isHighlight ? ' highlighted' : '');
+        if (isHighlight) highlighted++;
+    });
+    updateEventBadge(eventId, highlighted, cards.length);
+    updateGlobalStats();
+}
+
+/* --- Update per-event badge --- */
+function updateEventBadge(eventId, highlightedCount, keptCount) {
+    const badge = document.querySelector('.hl-count-badge[data-event-id="' + eventId + '"]');
+    if (badge) {
+        badge.textContent = highlightedCount + ' / ' + keptCount + ' highlighted';
+    }
+}
+
+/* --- Notes and description auto-save --- */
+async function onDescriptionBlur(textarea) {
+    const eventId = textarea.dataset.eventId;
+    await fetch('/api/update-description', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({event_id: eventId, description: textarea.value.trim()})
+    });
+}
+
+async function onNoteBlur(textarea) {
+    const eventId = textarea.dataset.eventId;
+    await fetch('/api/skeleton/add-note', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({event_id: eventId, note: textarea.value.trim()})
+    });
+}
+
+/* --- Continue to next step --- */
+async function continueToNext() {
+    const resp = await fetch('/api/stage/advance', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({})
+    });
+    if (resp.ok) {
+        const data = await resp.json();
+        window.location.href = '/wizard/' + data.next_step;
+    }
+}
+
+/* --- Init --- */
+document.addEventListener('DOMContentLoaded', updateGlobalStats);
+</script>
+{% endblock %}

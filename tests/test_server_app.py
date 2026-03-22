@@ -282,3 +282,83 @@ def test_enrich_page_renders(tmp_path):
     response = client.get("/wizard/enrich")
     assert response.status_code == 200
     assert "Enrichment" in response.text or "enrich" in response.text.lower()
+
+
+def test_toggle_highlight(tmp_path):
+    session = create_session("test-trip", base_dir=tmp_path)
+    session.current_stage = "enriched"
+    session.save()
+    from post_trip_summary.server.app import create_app
+    app = create_app(session)
+    app.state.trip = _make_test_trip(tmp_path)
+    from post_trip_summary.server.app import _build_event_index
+    app.state.event_index = _build_event_index(app.state.trip)
+    client = TestClient(app)
+    response = client.post("/api/toggle-highlight", json={"event_id": "day01-event01", "photo_index": 0})
+    assert response.status_code == 200
+    assert response.json()["is_highlight"] is True  # was False, now toggled
+
+
+def test_toggle_highlight_invalid_event(tmp_path):
+    session = create_session("test-trip", base_dir=tmp_path)
+    session.current_stage = "enriched"
+    session.save()
+    from post_trip_summary.server.app import create_app
+    app = create_app(session)
+    app.state.trip = _make_test_trip(tmp_path)
+    from post_trip_summary.server.app import _build_event_index
+    app.state.event_index = _build_event_index(app.state.trip)
+    client = TestClient(app)
+    response = client.post("/api/toggle-highlight", json={"event_id": "nonexistent", "photo_index": 0})
+    assert response.status_code == 404
+
+
+def test_bulk_action_highlight_all(tmp_path):
+    session = create_session("test-trip", base_dir=tmp_path)
+    session.current_stage = "enriched"
+    session.save()
+    from post_trip_summary.server.app import create_app
+    app = create_app(session)
+    app.state.trip = _make_test_trip(tmp_path)
+    from post_trip_summary.server.app import _build_event_index
+    app.state.event_index = _build_event_index(app.state.trip)
+    client = TestClient(app)
+    response = client.post("/api/bulk-action", json={"event_id": "day01-event01", "action": "highlight_all"})
+    assert response.status_code == 200
+    assert response.json()["action"] == "highlight_all"
+    # Photo is kept by default, so it should now be highlighted
+    event = app.state.event_index["day01-event01"]
+    assert event.photos[0].is_highlight is True
+
+
+def test_bulk_action_highlight_none(tmp_path):
+    session = create_session("test-trip", base_dir=tmp_path)
+    session.current_stage = "enriched"
+    session.save()
+    from post_trip_summary.server.app import create_app
+    app = create_app(session)
+    app.state.trip = _make_test_trip(tmp_path)
+    from post_trip_summary.server.app import _build_event_index
+    app.state.event_index = _build_event_index(app.state.trip)
+    # First highlight, then clear
+    event = app.state.event_index["day01-event01"]
+    event.photos[0].is_highlight = True
+    client = TestClient(app)
+    response = client.post("/api/bulk-action", json={"event_id": "day01-event01", "action": "highlight_none"})
+    assert response.status_code == 200
+    assert event.photos[0].is_highlight is False
+
+
+def test_highlights_page_renders(tmp_path):
+    session = create_session("test-trip", base_dir=tmp_path)
+    session.current_stage = "enriched"
+    session.save()
+    from post_trip_summary.server.app import create_app
+    app = create_app(session)
+    app.state.trip = _make_test_trip(tmp_path)
+    from post_trip_summary.server.app import _build_event_index
+    app.state.event_index = _build_event_index(app.state.trip)
+    client = TestClient(app)
+    response = client.get("/wizard/highlights")
+    assert response.status_code == 200
+    assert "day01-event01" in response.text
