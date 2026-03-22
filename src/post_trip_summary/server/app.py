@@ -1,6 +1,8 @@
 """FastAPI application factory for the wizard server."""
+from pathlib import Path
+
 import jinja2
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 from post_trip_summary.config import SessionConfig, STAGES
@@ -96,6 +98,36 @@ def create_app(session: SessionConfig) -> FastAPI:
         ctx["api_key_set"] = bool(vs.get("api_key"))
         template = env.get_template("setup.html")
         return HTMLResponse(template.render(**ctx))
+
+    @app.post("/api/session/inputs")
+    async def update_session_inputs(request: Request):
+        request_body = await request.json()
+        inputs = request_body.get("inputs", {})
+        settings = request_body.get("settings", {})
+
+        # Validate photos path exists if provided
+        photos_path = inputs.get("photos", "")
+        if photos_path:
+            if not Path(photos_path).is_dir():
+                raise HTTPException(422, f"Photos directory not found: {photos_path}")
+
+        # Validate optional source paths exist if provided
+        for key in ["excel", "credit_card", "google_maps", "apple_health", "dayone"]:
+            path = inputs.get(key, "")
+            if path:
+                if not Path(path).exists():
+                    raise HTTPException(422, f"File not found: {path}")
+
+        # Update session
+        app.state.session.inputs.update(inputs)
+        if "vision_provider" in settings:
+            app.state.session.settings["vision_provider"] = settings["vision_provider"]
+
+        if app.state.session.current_stage == "new":
+            app.state.session.current_stage = "setup"
+
+        app.state.session.save()
+        return JSONResponse({"status": "ok"})
 
     # Placeholder routes for remaining wizard steps
     for step_name in ["ingest", "review", "enrich", "highlights", "generate"]:
