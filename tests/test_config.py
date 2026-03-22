@@ -46,13 +46,33 @@ def test_delete_session(tmp_path):
 def test_current_stage_tracking(tmp_path):
     session = create_session("Paris 2026", base_dir=tmp_path)
     assert session.current_stage == "new"
-    session.current_stage = "ingest"
+    session.current_stage = "ingested"
     session.save()
     loaded = load_session("paris-2026", base_dir=tmp_path)
-    assert loaded.current_stage == "ingest"
+    assert loaded.current_stage == "ingested"
 
 
 def test_config_settings_defaults(tmp_path):
     session = create_session("Paris 2026", base_dir=tmp_path)
     assert session.settings["cluster_time_gap_minutes"] == 15
     assert session.settings["cluster_distance_meters"] == 200
+
+
+def test_new_stages_list():
+    from post_trip_summary.config import STAGES
+    assert STAGES == ["new", "setup", "ingested", "reviewed", "enriched", "highlights_done", "generated"]
+
+
+def test_stage_file_ingested(tmp_path):
+    session = create_session("test", base_dir=tmp_path)
+    assert session.stage_file("ingested").name == "trip_ingested.json"
+
+
+def test_stage_file_reviewed(tmp_path):
+    session = create_session("test", base_dir=tmp_path)
+    assert session.stage_file("reviewed").name == "trip_reviewed.json"
+
+
+def test_stage_file_highlights_done(tmp_path):
+    session = create_session("test", base_dir=tmp_path)
+    assert session.stage_file("highlights_done").name == "trip_final.json"

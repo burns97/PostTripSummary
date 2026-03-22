@@ -14,7 +14,7 @@ DEFAULT_SETTINGS = {
     "quality_cull_percentile": 15,
 }
 
-STAGES = ["new", "ingest", "skeleton", "skeleton_reviewed", "enriched", "final", "generated"]
+STAGES = ["new", "setup", "ingested", "reviewed", "enriched", "highlights_done", "generated"]
 
 
 def _slugify(name: str) -> str:
@@ -47,12 +47,19 @@ class SessionConfig:
 
     def stage_file(self, stage: str) -> Path:
         filenames = {
+            # New wizard stages
+            "ingested": "trip_ingested.json",
+            "reviewed": "trip_reviewed.json",
+            "enriched": "trip_enriched.json",
+            "highlights_done": "trip_final.json",
+            # Legacy (deprecated — kept so existing CLI commands don't crash)
             "ingest": "trip_data.json",
             "skeleton": "trip_skeleton.json",
             "skeleton_reviewed": "trip_skeleton_reviewed.json",
-            "enriched": "trip_enriched.json",
             "final": "trip_final.json",
         }
+        if stage not in filenames:
+            raise ValueError(f"No file for stage: {stage}")
         return self.session_dir / filenames[stage]
 
     @property

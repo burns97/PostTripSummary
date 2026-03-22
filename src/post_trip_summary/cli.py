@@ -71,7 +71,7 @@ def delete(slug: str, base_dir: Path | None):
         click.echo(f"Deleted session '{slug}'.")
 
 
-STAGE_ORDER = ["new", "ingest", "skeleton", "skeleton_reviewed", "enriched", "final", "generated"]
+STAGE_ORDER = ["new", "setup", "ingested", "reviewed", "enriched", "highlights_done", "generated"]
 
 
 @cli.command()
