@@ -18,6 +18,20 @@ from post_trip_summary.settings import get_vision_settings
 THUMB_MAX_WIDTH = 300
 
 
+def _serialize_event(event):
+    """Serialize an event for JSON API responses."""
+    return {
+        "id": event.id,
+        "name": event.name,
+        "type": event.type,
+        "time_range": f"{event.time_range[0].strftime('%H:%M')} - {event.time_range[1].strftime('%H:%M')}",
+        "photo_count": len(event.photos),
+        "sources": event.sources,
+        "notes": event.notes or "",
+        "thumb_urls": [f"/photos/{event.id}/{i}" for i in range(min(8, len(event.photos)))],
+    }
+
+
 def _build_event_index(trip):
     """Build {event_id: event} lookup dict."""
     if trip is None:
@@ -229,11 +243,11 @@ def create_app(session: SessionConfig) -> FastAPI:
 
         async def _generate():
             if tracker is None:
-                yield {"data": json_mod.dumps({"done": True, "phase": "idle"})}
+                yield {"event": "state", "data": json_mod.dumps({"done": True, "phase": "idle"})}
                 return
             while True:
                 state = tracker.get_state()
-                yield {"data": json_mod.dumps(state)}
+                yield {"event": "state", "data": json_mod.dumps(state)}
                 if state.get("done") or state.get("failed"):
                     return
                 await asyncio.sleep(0.5)
@@ -242,12 +256,197 @@ def create_app(session: SessionConfig) -> FastAPI:
 
     @app.get("/wizard/ingest", response_class=HTMLResponse)
     def wizard_ingest():
+        # If ingest already completed, redirect to the next step
+        if app.state.session.current_stage not in ("setup", "new"):
+            step = STAGE_TO_STEP.get(app.state.session.current_stage, "review")
+            if step != "ingest":
+                return RedirectResponse(f"/wizard/{step}", status_code=307)
+
         ctx = _get_wizard_context(app.state.session)
         ctx["stage_title"] = "Processing Trip Data"
         ctx["compute_stage"] = "ingest"
         ctx["auto_start"] = app.state.session.current_stage == "setup"
         template = env.get_template("progress.html")
         return template.render(**ctx)
+
+    def _save_trip():
+        """Persist current trip state."""
+        from post_trip_summary.serialization import save_trip as _save
+        stage = app.state.session.current_stage
+        if stage in ("ingested", "reviewed"):
+            _save(app.state.trip, app.state.session.stage_file("reviewed"))
+        else:
+            _save(app.state.trip, app.state.session.stage_file(stage))
+
+    def _rebuild_index():
+        """Rebuild event index and clear thumbnail cache after structural changes."""
+        app.state.event_index = _build_event_index(app.state.trip)
+        app.state.thumb_cache.clear()
+
+    # --- Skeleton editing endpoints ---
+
+    @app.post("/api/skeleton/merge")
+    async def skeleton_merge(request: Request):
+        from post_trip_summary.pipeline.skeleton_ops import merge_events
+        body = await request.json()
+        day_index = body.get("day_index")
+        event_ids = body.get("event_ids", [])
+        if day_index is None or len(event_ids) < 2:
+            raise HTTPException(400, "day_index and at least 2 event_ids required")
+        trip = app.state.trip
+        if trip is None or day_index >= len(trip.days):
+            raise HTTPException(404, "Day not found")
+        day = trip.days[day_index]
+        try:
+            merged = merge_events(day, event_ids)
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+        _rebuild_index()
+        _save_trip()
+        return JSONResponse({"merged_event": _serialize_event(merged)})
+
+    @app.post("/api/skeleton/rename")
+    async def skeleton_rename(request: Request):
+        from post_trip_summary.pipeline.skeleton_ops import rename_event
+        body = await request.json()
+        event_id = body.get("event_id")
+        new_name = body.get("new_name", "").strip()
+        if not event_id or not new_name:
+            raise HTTPException(400, "event_id and new_name required")
+        event = app.state.event_index.get(event_id)
+        if not event:
+            raise HTTPException(404, "Event not found")
+        rename_event(event, new_name)
+        _save_trip()
+        return JSONResponse({"event_id": event_id, "new_name": new_name})
+
+    @app.post("/api/skeleton/delete")
+    async def skeleton_delete(request: Request):
+        from post_trip_summary.pipeline.skeleton_ops import delete_event
+        body = await request.json()
+        event_id = body.get("event_id")
+        day_index = body.get("day_index")
+        if event_id is None or day_index is None:
+            raise HTTPException(400, "event_id and day_index required")
+        trip = app.state.trip
+        if trip is None or day_index >= len(trip.days):
+            raise HTTPException(404, "Day not found")
+        day = trip.days[day_index]
+        try:
+            delete_event(day, event_id)
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+        _rebuild_index()
+        _save_trip()
+        return JSONResponse({"deleted": event_id})
+
+    @app.post("/api/skeleton/update-type")
+    async def skeleton_update_type(request: Request):
+        from post_trip_summary.pipeline.skeleton_ops import change_event_type
+        body = await request.json()
+        event_id = body.get("event_id")
+        new_type = body.get("new_type", "").strip()
+        if not event_id or not new_type:
+            raise HTTPException(400, "event_id and new_type required")
+        event = app.state.event_index.get(event_id)
+        if not event:
+            raise HTTPException(404, "Event not found")
+        try:
+            change_event_type(event, new_type)
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+        _save_trip()
+        return JSONResponse({"event_id": event_id, "new_type": new_type})
+
+    @app.post("/api/skeleton/add-note")
+    async def skeleton_add_note(request: Request):
+        from post_trip_summary.pipeline.skeleton_ops import set_event_note
+        body = await request.json()
+        event_id = body.get("event_id")
+        note = body.get("note", "")
+        if not event_id:
+            raise HTTPException(400, "event_id required")
+        event = app.state.event_index.get(event_id)
+        if not event:
+            raise HTTPException(404, "Event not found")
+        set_event_note(event, note)
+        _save_trip()
+        return JSONResponse({"event_id": event_id, "note": note})
+
+    @app.post("/api/skeleton/suggest-merge-name")
+    async def skeleton_suggest_merge_name(request: Request):
+        from post_trip_summary.pipeline.skeleton_ops import suggest_merge_name
+        body = await request.json()
+        event_ids = body.get("event_ids", [])
+        if len(event_ids) < 2:
+            raise HTTPException(400, "At least 2 event_ids required")
+        events = [app.state.event_index.get(eid) for eid in event_ids]
+        if any(e is None for e in events):
+            raise HTTPException(404, "One or more events not found")
+        name = suggest_merge_name(events)
+        return JSONResponse({"suggested_name": name})
+
+    # --- Photo review endpoints ---
+
+    @app.post("/api/toggle-keep")
+    async def toggle_keep(request: Request):
+        body = await request.json()
+        event_id = body.get("event_id")
+        photo_index = body.get("photo_index")
+        if event_id is None or photo_index is None:
+            raise HTTPException(400, "event_id and photo_index required")
+        event = app.state.event_index.get(event_id)
+        if not event or photo_index >= len(event.photos):
+            raise HTTPException(404, "Photo not found")
+        photo = event.photos[photo_index]
+        photo.is_kept = not photo.is_kept
+        _save_trip()
+        return JSONResponse({"event_id": event_id, "photo_index": photo_index, "is_kept": photo.is_kept})
+
+    @app.post("/api/bulk-action")
+    async def bulk_action(request: Request):
+        body = await request.json()
+        event_id = body.get("event_id")
+        action = body.get("action")
+        if not event_id or action not in ("keep_all", "remove_all"):
+            raise HTTPException(400, "event_id and action (keep_all|remove_all) required")
+        event = app.state.event_index.get(event_id)
+        if not event:
+            raise HTTPException(404, "Event not found")
+        keep = action == "keep_all"
+        for photo in event.photos:
+            photo.is_kept = keep
+        _save_trip()
+        return JSONResponse({"event_id": event_id, "action": action, "photo_count": len(event.photos)})
+
+    # --- Description editing ---
+
+    @app.post("/api/update-description")
+    async def update_description(request: Request):
+        body = await request.json()
+        event_id = body.get("event_id")
+        description = body.get("description", "")
+        if not event_id:
+            raise HTTPException(400, "event_id required")
+        event = app.state.event_index.get(event_id)
+        if not event:
+            raise HTTPException(404, "Event not found")
+        event.description = description
+        _save_trip()
+        return JSONResponse({"event_id": event_id, "description": description})
+
+    # --- Stage advancement ---
+
+    @app.post("/api/stage/advance")
+    async def advance_stage(request: Request):
+        current = app.state.session.current_stage
+        idx = STAGES.index(current)
+        if idx + 1 < len(STAGES):
+            app.state.session.current_stage = STAGES[idx + 1]
+            app.state.session.save()
+            _save_trip()
+        step = STAGE_TO_STEP.get(app.state.session.current_stage, "review")
+        return JSONResponse({"stage": app.state.session.current_stage, "next_step": step})
 
     # Placeholder routes for remaining wizard steps
     for step_name in ["review", "enrich", "highlights", "generate"]:
@@ -265,10 +464,13 @@ def _register_placeholder_step(app: FastAPI, env: jinja2.Environment, step_name:
         "<p>This step is not yet implemented.</p>"
         "{% endblock %}"
     )
-    compiled = env.from_string(template_str)
+    # Store the template string and step name in a closure — avoid passing
+    # Jinja2 Template objects as default args (FastAPI deepcopy breaks them)
+    _tpl_str = template_str
+    _name = step_name
 
     @app.get(f"/wizard/{step_name}", name=f"wizard_{step_name}")
-    def wizard_placeholder(compiled=compiled, step_name=step_name):
-        from post_trip_summary.server.app import _get_wizard_context
+    def wizard_placeholder():
+        compiled = env.from_string(_tpl_str)
         ctx = _get_wizard_context(app.state.session)
         return HTMLResponse(compiled.render(**ctx))

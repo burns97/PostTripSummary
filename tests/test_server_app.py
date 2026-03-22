@@ -189,3 +189,48 @@ def test_progress_endpoint_exists(tmp_path):
     client = TestClient(app)
     response = client.get("/api/progress")
     assert response.status_code == 200
+
+
+def test_toggle_keep(tmp_path):
+    session = create_session("test-trip", base_dir=tmp_path)
+    session.current_stage = "ingested"
+    session.save()
+    from post_trip_summary.server.app import create_app
+    app = create_app(session)
+    app.state.trip = _make_test_trip(tmp_path)
+    from post_trip_summary.server.app import _build_event_index
+    app.state.event_index = _build_event_index(app.state.trip)
+    client = TestClient(app)
+    response = client.post("/api/toggle-keep", json={"event_id": "day01-event01", "photo_index": 0})
+    assert response.status_code == 200
+    assert response.json()["is_kept"] is False
+
+
+def test_skeleton_rename(tmp_path):
+    session = create_session("test-trip", base_dir=tmp_path)
+    session.current_stage = "ingested"
+    session.save()
+    from post_trip_summary.server.app import create_app
+    app = create_app(session)
+    app.state.trip = _make_test_trip(tmp_path)
+    from post_trip_summary.server.app import _build_event_index
+    app.state.event_index = _build_event_index(app.state.trip)
+    client = TestClient(app)
+    response = client.post("/api/skeleton/rename", json={"event_id": "day01-event01", "new_name": "Renamed"})
+    assert response.status_code == 200
+    assert response.json()["new_name"] == "Renamed"
+
+
+def test_advance_stage(tmp_path):
+    session = create_session("test-trip", base_dir=tmp_path)
+    session.current_stage = "ingested"
+    session.save()
+    from post_trip_summary.server.app import create_app
+    app = create_app(session)
+    app.state.trip = _make_test_trip(tmp_path)
+    from post_trip_summary.server.app import _build_event_index
+    app.state.event_index = _build_event_index(app.state.trip)
+    client = TestClient(app)
+    response = client.post("/api/stage/advance")
+    assert response.status_code == 200
+    assert response.json()["stage"] == "reviewed"
