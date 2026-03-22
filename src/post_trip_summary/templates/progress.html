@@ -1,0 +1,113 @@
+{% extends "wizard.html" %}
+{% block title %}{{ stage_title }}{% endblock %}
+
+{% block extra_css %}
+.progress-container { max-width: 600px; margin: 3rem auto; text-align: center; }
+.progress-card { background: #16213e; border-radius: 12px; padding: 2rem; }
+.stage-title { font-size: 1.3rem; margin-bottom: 1.5rem; }
+.progress-bar-track { background: #0f3460; border-radius: 8px; height: 8px; margin: 1rem 0; overflow: hidden; }
+.progress-bar-fill { background: #2ecc71; height: 100%; border-radius: 8px; transition: width 0.3s ease; width: 0%; }
+.progress-bar-fill.indeterminate { width: 30%; animation: slide 1.5s infinite ease-in-out; }
+@keyframes slide { 0% { transform: translateX(-100%); } 100% { transform: translateX(400%); } }
+.progress-label { color: #aaa; font-size: 0.9rem; margin-top: 0.5rem; min-height: 1.5em; }
+.progress-stats { color: #888; font-size: 0.85rem; margin-top: 1rem; }
+.error-message { color: #e74c3c; margin-top: 1rem; }
+{% endblock %}
+
+{% block content %}
+<div class="progress-container">
+  <div class="progress-card">
+    <div class="stage-title" id="stage-title">{{ stage_title }}</div>
+    <div class="progress-bar-track">
+      <div class="progress-bar-fill indeterminate" id="progress-bar"></div>
+    </div>
+    <div class="progress-label" id="progress-label">Starting...</div>
+    <div class="progress-stats" id="progress-stats"></div>
+    <div class="error-message" id="error-message" style="display: none;"></div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+const phaseLabels = {
+  scanning: "Scanning Photos",
+  scoring: "Scoring Quality",
+  supplementary: "Parsing Data Sources",
+  skeleton: "Building Skeleton",
+};
+
+function connectSSE() {
+  const source = new EventSource("/api/progress");
+  const bar = document.getElementById("progress-bar");
+  const label = document.getElementById("progress-label");
+  const stats = document.getElementById("progress-stats");
+  const title = document.getElementById("stage-title");
+  const errorEl = document.getElementById("error-message");
+
+  source.addEventListener("state", function(e) {
+    const state = JSON.parse(e.data);
+
+    if (state.done) {
+      source.close();
+      bar.classList.remove("indeterminate");
+      bar.style.width = "100%";
+      label.textContent = "Complete!";
+      setTimeout(() => { window.location.href = "/wizard/" + (state.next_stage || "review"); }, 1000);
+      return;
+    }
+
+    if (state.failed) {
+      source.close();
+      bar.classList.remove("indeterminate");
+      bar.style.width = "0%";
+      bar.style.background = "#e74c3c";
+      label.textContent = "Failed";
+      errorEl.textContent = state.error;
+      errorEl.style.display = "block";
+      return;
+    }
+
+    if (state.phase) {
+      title.textContent = phaseLabels[state.phase] || state.phase;
+    }
+
+    if (state.total > 0) {
+      const pct = Math.round((state.current / state.total) * 100);
+      bar.classList.remove("indeterminate");
+      bar.style.width = pct + "%";
+      stats.textContent = state.current + " / " + state.total;
+    } else {
+      bar.classList.add("indeterminate");
+      stats.textContent = "";
+    }
+
+    label.textContent = state.label || "";
+  });
+
+  source.onerror = function() {
+    source.close();
+    setTimeout(connectSSE, 2000);
+  };
+}
+
+{% if auto_start %}
+fetch("/api/stage/start", {
+  method: "POST",
+  headers: {"Content-Type": "application/json"},
+  body: JSON.stringify({stage: "{{ compute_stage }}"})
+}).then(resp => {
+  if (resp.ok) { connectSSE(); }
+  else { resp.json().then(d => {
+    document.getElementById("error-message").textContent = d.detail || "Failed to start";
+    document.getElementById("error-message").style.display = "block";
+  }); }
+}).catch(err => {
+  document.getElementById("error-message").textContent = "Network error: " + err.message;
+  document.getElementById("error-message").style.display = "block";
+});
+{% else %}
+connectSSE();
+{% endif %}
+</script>
+{% endblock %}

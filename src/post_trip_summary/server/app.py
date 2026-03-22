@@ -240,8 +240,17 @@ def create_app(session: SessionConfig) -> FastAPI:
 
         return EventSourceResponse(_generate())
 
+    @app.get("/wizard/ingest", response_class=HTMLResponse)
+    def wizard_ingest():
+        ctx = _get_wizard_context(app.state.session)
+        ctx["stage_title"] = "Processing Trip Data"
+        ctx["compute_stage"] = "ingest"
+        ctx["auto_start"] = app.state.session.current_stage == "setup"
+        template = env.get_template("progress.html")
+        return template.render(**ctx)
+
     # Placeholder routes for remaining wizard steps
-    for step_name in ["ingest", "review", "enrich", "highlights", "generate"]:
+    for step_name in ["review", "enrich", "highlights", "generate"]:
         _register_placeholder_step(app, env, step_name)
 
     return app

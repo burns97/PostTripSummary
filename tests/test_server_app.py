@@ -170,6 +170,18 @@ def test_start_ingest_returns_ok(tmp_path):
     assert response.json()["status"] == "started"
 
 
+def test_ingest_page_renders(tmp_path):
+    session = create_session("test-trip", base_dir=tmp_path)
+    session.current_stage = "setup"
+    session.save()
+    from post_trip_summary.server.app import create_app
+    app = create_app(session)
+    client = TestClient(app)
+    response = client.get("/wizard/ingest")
+    assert response.status_code == 200
+    assert "Processing" in response.text or "progress" in response.text.lower()
+
+
 def test_progress_endpoint_exists(tmp_path):
     session = create_session("test-trip", base_dir=tmp_path)
     from post_trip_summary.server.app import create_app
