@@ -1,14 +1,18 @@
 """FastAPI application factory for the wizard server."""
+import asyncio
 import io
+import json as json_mod
 from pathlib import Path
 from pathlib import Path as FilePath
 
 import jinja2
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
+from sse_starlette.sse import EventSourceResponse
 
 from post_trip_summary.config import SessionConfig, STAGES
 from post_trip_summary.serialization import load_trip
+from post_trip_summary.server.progress import ProgressTracker
 from post_trip_summary.settings import get_vision_settings
 
 THUMB_MAX_WIDTH = 300
@@ -187,6 +191,54 @@ def create_app(session: SessionConfig) -> FastAPI:
                             app.state.thumb_cache[cache_key] = _make_thumbnail(photo.path)
                         return Response(content=app.state.thumb_cache[cache_key], media_type="image/jpeg")
         raise HTTPException(404, f"Photo not found: {filename}")
+
+    @app.post("/api/stage/start")
+    async def start_stage(request: Request):
+        body = await request.json()
+        stage = body.get("stage")
+        if stage != "ingest":
+            raise HTTPException(400, f"Unknown stage: {stage}")
+
+        # Reject if a task is already running
+        if app.state.background_task is not None and not app.state.background_task.done():
+            return JSONResponse({"status": "already_running"}, status_code=409)
+
+        tracker = ProgressTracker()
+        app.state.progress = tracker
+
+        async def _run():
+            try:
+                from post_trip_summary.server.compute import run_ingest_pipeline
+                trip = await asyncio.to_thread(
+                    run_ingest_pipeline, app.state.session, tracker.callback()
+                )
+                app.state.trip = trip
+                app.state.event_index = _build_event_index(trip)
+                app.state.session.current_stage = "ingested"
+                app.state.session.save()
+                tracker.complete("review")
+            except Exception as e:
+                tracker.fail(str(e))
+
+        app.state.background_task = asyncio.create_task(_run())
+        return JSONResponse({"status": "started"})
+
+    @app.get("/api/progress")
+    async def progress_stream():
+        tracker = getattr(app.state, "progress", None)
+
+        async def _generate():
+            if tracker is None:
+                yield {"data": json_mod.dumps({"done": True, "phase": "idle"})}
+                return
+            while True:
+                state = tracker.get_state()
+                yield {"data": json_mod.dumps(state)}
+                if state.get("done") or state.get("failed"):
+                    return
+                await asyncio.sleep(0.5)
+
+        return EventSourceResponse(_generate())
 
     # Placeholder routes for remaining wizard steps
     for step_name in ["ingest", "review", "enrich", "highlights", "generate"]:

@@ -1,5 +1,6 @@
 from datetime import date, datetime
 from pathlib import Path
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 from PIL import Image
@@ -152,3 +153,27 @@ def test_photo_serving_not_found(tmp_path):
     client = TestClient(app)
     response = client.get("/photos/nonexistent-event/0")
     assert response.status_code == 404
+
+
+def test_start_ingest_returns_ok(tmp_path):
+    session = create_session("test-trip", base_dir=tmp_path)
+    photos_dir = tmp_path / "photos"
+    photos_dir.mkdir()
+    session.inputs["photos"] = str(photos_dir)
+    session.current_stage = "setup"
+    session.save()
+    from post_trip_summary.server.app import create_app
+    app = create_app(session)
+    client = TestClient(app)
+    response = client.post("/api/stage/start", json={"stage": "ingest"})
+    assert response.status_code == 200
+    assert response.json()["status"] == "started"
+
+
+def test_progress_endpoint_exists(tmp_path):
+    session = create_session("test-trip", base_dir=tmp_path)
+    from post_trip_summary.server.app import create_app
+    app = create_app(session)
+    client = TestClient(app)
+    response = client.get("/api/progress")
+    assert response.status_code == 200
