@@ -1,0 +1,252 @@
+{% extends "wizard.html" %}
+
+{% block content %}
+<h1>Generate Outputs</h1>
+<h2>Select which outputs to create, then hit Generate.</h2>
+
+<div id="options-section">
+    <div class="option-group">
+        <label class="option-label">
+            <input type="checkbox" id="opt-detailed" checked>
+            <span class="option-info">
+                <strong>Detailed Record</strong>
+                <span class="option-desc">Full HTML record with all events, photos, and descriptions</span>
+            </span>
+        </label>
+        <label class="option-label">
+            <input type="checkbox" id="opt-pdf" checked>
+            <span class="option-info">
+                <strong>Shareable Summary</strong>
+                <span class="option-desc">PDF with highlights, stats, and route map</span>
+            </span>
+        </label>
+        <label class="option-label">
+            <input type="checkbox" id="opt-blog" checked>
+            <span class="option-info">
+                <strong>Blog Post</strong>
+                <span class="option-desc">Blog-ready HTML with top highlights</span>
+            </span>
+        </label>
+        <label class="option-label">
+            <input type="checkbox" id="opt-photos" checked>
+            <span class="option-info">
+                <strong>Photo Prep</strong>
+                <span class="option-desc">Copy and resize highlight photos to JPEG</span>
+            </span>
+        </label>
+    </div>
+
+    <button id="generate-btn" class="btn-primary" onclick="generateOutputs()">Generate</button>
+</div>
+
+<div id="results-section" style="display:none;">
+    <h2>Generated Outputs</h2>
+    <div id="results-list"></div>
+    <p class="output-dir-info">Output directory: <code>{{ output_dir }}</code></p>
+    <p class="done-message">Processing complete. You can close this tab and stop the server with Ctrl+C in the terminal.</p>
+</div>
+
+<div id="error-section" style="display:none;">
+    <p class="error-message" id="error-text"></p>
+    <button class="btn-primary" onclick="resetForm()">Try Again</button>
+</div>
+{% endblock %}
+
+{% block extra_css %}
+.option-group {
+    display: flex;
+    flex-direction: column;
+    gap: 0.8em;
+    margin-bottom: 1.5em;
+}
+.option-label {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.8em;
+    padding: 1em;
+    background: #16213e;
+    border: 1px solid #0f3460;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: border-color 0.2s;
+}
+.option-label:hover {
+    border-color: #3498db;
+}
+.option-label input[type="checkbox"] {
+    margin-top: 0.3em;
+    width: 18px;
+    height: 18px;
+    accent-color: #3498db;
+}
+.option-info {
+    display: flex;
+    flex-direction: column;
+    gap: 0.2em;
+}
+.option-info strong {
+    color: #fff;
+    font-size: 1em;
+}
+.option-desc {
+    color: #888;
+    font-size: 0.85em;
+}
+
+#results-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.8em;
+    margin-bottom: 1.5em;
+}
+.result-card {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 1em;
+    background: #16213e;
+    border: 1px solid #0f3460;
+    border-radius: 6px;
+}
+.result-info {
+    display: flex;
+    flex-direction: column;
+    gap: 0.2em;
+}
+.result-info strong {
+    color: #fff;
+}
+.result-info .result-path {
+    color: #888;
+    font-size: 0.85em;
+    font-family: monospace;
+}
+.result-actions {
+    display: flex;
+    gap: 0.5em;
+}
+.btn-preview {
+    padding: 0.4em 1em;
+    background: #2ecc71;
+    color: #1a1a2e;
+    border: none;
+    border-radius: 4px;
+    font-size: 0.85em;
+    cursor: pointer;
+    text-decoration: none;
+    font-weight: bold;
+}
+.btn-preview:hover {
+    background: #27ae60;
+}
+.output-dir-info {
+    color: #aaa;
+    margin-bottom: 0.5em;
+}
+.output-dir-info code {
+    color: #3498db;
+    background: #16213e;
+    padding: 0.2em 0.5em;
+    border-radius: 3px;
+}
+.done-message {
+    color: #2ecc71;
+    font-weight: bold;
+    margin-top: 1em;
+}
+.error-message {
+    color: #e74c3c;
+    padding: 1em;
+    background: rgba(231, 76, 60, 0.1);
+    border: 1px solid #e74c3c;
+    border-radius: 4px;
+    margin-bottom: 1em;
+}
+{% endblock %}
+
+{% block extra_js %}
+<script>
+const TYPE_LABELS = {
+    detailed_record: "Detailed Record",
+    shareable_pdf: "Shareable Summary",
+    blog_post: "Blog Post",
+    photo_prep: "Photo Prep",
+};
+
+async function generateOutputs() {
+    const btn = document.getElementById('generate-btn');
+    btn.disabled = true;
+    btn.textContent = 'Generating...';
+
+    const outputs = {
+        detailed_record: document.getElementById('opt-detailed').checked,
+        shareable_pdf: document.getElementById('opt-pdf').checked,
+        blog_post: document.getElementById('opt-blog').checked,
+        photo_prep: document.getElementById('opt-photos').checked,
+    };
+
+    // Check at least one is selected
+    if (!Object.values(outputs).some(v => v)) {
+        btn.disabled = false;
+        btn.textContent = 'Generate';
+        alert('Select at least one output type.');
+        return;
+    }
+
+    try {
+        const resp = await fetch('/api/generate', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(outputs),
+        });
+
+        if (!resp.ok) {
+            const err = await resp.json();
+            throw new Error(err.detail || 'Generation failed');
+        }
+
+        const data = await resp.json();
+        showResults(data);
+    } catch (e) {
+        document.getElementById('options-section').style.display = 'none';
+        document.getElementById('error-section').style.display = 'block';
+        document.getElementById('error-text').textContent = 'Error: ' + e.message;
+    }
+}
+
+function showResults(data) {
+    document.getElementById('options-section').style.display = 'none';
+    document.getElementById('results-section').style.display = 'block';
+
+    const list = document.getElementById('results-list');
+    list.innerHTML = '';
+
+    for (const file of data.files) {
+        const card = document.createElement('div');
+        card.className = 'result-card';
+
+        let actions = '';
+        if (file.preview_url) {
+            actions = `<a href="${file.preview_url}" target="_blank" class="btn-preview">Preview</a>`;
+        }
+
+        card.innerHTML = `
+            <div class="result-info">
+                <strong>${TYPE_LABELS[file.type] || file.type}</strong>
+                <span class="result-path">${file.path}</span>
+            </div>
+            <div class="result-actions">${actions}</div>
+        `;
+        list.appendChild(card);
+    }
+}
+
+function resetForm() {
+    document.getElementById('error-section').style.display = 'none';
+    document.getElementById('options-section').style.display = 'block';
+    const btn = document.getElementById('generate-btn');
+    btn.disabled = false;
+    btn.textContent = 'Generate';
+}
+</script>
+{% endblock %}
