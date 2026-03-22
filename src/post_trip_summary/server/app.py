@@ -465,19 +465,45 @@ def create_app(session: SessionConfig) -> FastAPI:
         _save_trip()
         return JSONResponse({"event_id": event_id, "photo_index": photo_index, "is_kept": photo.is_kept})
 
+    @app.post("/api/toggle-highlight")
+    async def toggle_highlight(request: Request):
+        body = await request.json()
+        event = app.state.event_index.get(body.get("event_id"))
+        if not event:
+            raise HTTPException(404, "Event not found")
+        idx = body.get("photo_index")
+        if idx is None or idx >= len(event.photos):
+            raise HTTPException(400, "Invalid photo index")
+        photo = event.photos[idx]
+        photo.is_highlight = not photo.is_highlight
+        _save_trip()
+        highlighted = sum(1 for p in event.photos if p.is_kept and p.is_highlight)
+        kept = sum(1 for p in event.photos if p.is_kept)
+        return JSONResponse({"is_highlight": photo.is_highlight,
+                           "highlighted_count": highlighted, "kept_count": kept})
+
     @app.post("/api/bulk-action")
     async def bulk_action(request: Request):
         body = await request.json()
         event_id = body.get("event_id")
         action = body.get("action")
-        if not event_id or action not in ("keep_all", "remove_all"):
-            raise HTTPException(400, "event_id and action (keep_all|remove_all) required")
+        valid_actions = ("keep_all", "remove_all", "highlight_all", "highlight_none")
+        if not event_id or action not in valid_actions:
+            raise HTTPException(400, "event_id and action (keep_all|remove_all|highlight_all|highlight_none) required")
         event = app.state.event_index.get(event_id)
         if not event:
             raise HTTPException(404, "Event not found")
-        keep = action == "keep_all"
-        for photo in event.photos:
-            photo.is_kept = keep
+        if action in ("keep_all", "remove_all"):
+            keep = action == "keep_all"
+            for photo in event.photos:
+                photo.is_kept = keep
+        elif action == "highlight_all":
+            for photo in event.photos:
+                if photo.is_kept:
+                    photo.is_highlight = True
+        elif action == "highlight_none":
+            for photo in event.photos:
+                photo.is_highlight = False
         _save_trip()
         return JSONResponse({"event_id": event_id, "action": action, "photo_count": len(event.photos)})
 
@@ -543,8 +569,18 @@ def create_app(session: SessionConfig) -> FastAPI:
         template = env.get_template("enrich.html")
         return HTMLResponse(template.render(**ctx))
 
+    @app.get("/wizard/highlights", response_class=HTMLResponse)
+    def wizard_highlights():
+        if app.state.trip is None:
+            return RedirectResponse("/wizard/setup", status_code=307)
+        ctx = _get_wizard_context(app.state.session)
+        ctx["trip"] = app.state.trip
+        ctx["type_icons"] = TYPE_ICONS
+        template = env.get_template("highlights.html")
+        return HTMLResponse(template.render(**ctx))
+
     # Placeholder routes for remaining wizard steps
-    for step_name in ["highlights", "generate"]:
+    for step_name in ["generate"]:
         _register_placeholder_step(app, env, step_name)
 
     return app
