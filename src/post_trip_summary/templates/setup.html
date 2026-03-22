@@ -1,0 +1,105 @@
+{% extends "wizard.html" %}
+{% block title %}Setup - {{ session.name }}{% endblock %}
+
+{% block content %}
+<h1>Trip Setup</h1>
+<h2>{{ session.name }}</h2>
+
+<form id="setup-form">
+    <div class="form-group">
+        <label for="photos">Photos Directory *</label>
+        <input type="text" id="photos" name="photos" placeholder="/path/to/photos"
+               value="{{ session.inputs.get('photos', '') }}" required>
+        <div class="hint">Directory containing trip photos (required)</div>
+    </div>
+
+    <div class="form-group">
+        <label for="excel">Excel Itinerary</label>
+        <input type="text" id="excel" name="excel" placeholder="/path/to/itinerary.xlsx"
+               value="{{ session.inputs.get('excel', '') }}">
+    </div>
+
+    <div class="form-group">
+        <label for="credit_card">Credit Card CSV</label>
+        <input type="text" id="credit_card" name="credit_card" placeholder="/path/to/transactions.csv"
+               value="{{ session.inputs.get('credit_card', '') }}">
+    </div>
+
+    <div class="form-group">
+        <label for="google_maps">Google Maps Timeline</label>
+        <input type="text" id="google_maps" name="google_maps" placeholder="/path/to/timeline.json"
+               value="{{ session.inputs.get('google_maps', '') }}">
+    </div>
+
+    <div class="form-group">
+        <label for="apple_health">Apple Health Export</label>
+        <input type="text" id="apple_health" name="apple_health" placeholder="/path/to/export.xml"
+               value="{{ session.inputs.get('apple_health', '') }}">
+    </div>
+
+    <div class="form-group">
+        <label for="dayone">Day One Journal</label>
+        <input type="text" id="dayone" name="dayone" placeholder="/path/to/journal.json"
+               value="{{ session.inputs.get('dayone', '') }}">
+    </div>
+
+    <hr style="border-color: #0f3460; margin: 1.5em 0;">
+
+    <div class="form-group">
+        <label for="vision_provider">Vision Provider</label>
+        <select id="vision_provider" name="vision_provider">
+            <option value="gemini" {% if vision_provider == 'gemini' %}selected{% endif %}>Gemini</option>
+            <option value="claude" {% if vision_provider == 'claude' %}selected{% endif %}>Claude</option>
+        </select>
+    </div>
+
+    <div class="form-group">
+        <label>API Key Status</label>
+        <div style="color: {% if api_key_set %}#2ecc71{% else %}#e74c3c{% endif %};">
+            {% if api_key_set %}Key configured{% else %}No key found (check settings.toml or env vars){% endif %}
+        </div>
+    </div>
+
+    <div id="error-message" style="color: #e74c3c; margin-bottom: 1em; display: none;"></div>
+
+    <button type="submit" class="btn-primary">Start Processing</button>
+</form>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+document.getElementById('setup-form').addEventListener('submit', async function(e) {
+    e.preventDefault();
+    const errorEl = document.getElementById('error-message');
+    errorEl.style.display = 'none';
+
+    const inputs = {};
+    for (const key of ['photos', 'excel', 'credit_card', 'google_maps', 'apple_health', 'dayone']) {
+        const val = document.getElementById(key).value.trim();
+        if (val) inputs[key] = val;
+    }
+
+    const settings = {
+        vision_provider: document.getElementById('vision_provider').value,
+    };
+
+    try {
+        const resp = await fetch('/api/session/inputs', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({inputs, settings}),
+        });
+        const data = await resp.json();
+        if (!resp.ok) {
+            errorEl.textContent = data.detail || 'Validation error';
+            errorEl.style.display = 'block';
+            return;
+        }
+        window.location.href = '/wizard/ingest';
+    } catch (err) {
+        errorEl.textContent = 'Network error: ' + err.message;
+        errorEl.style.display = 'block';
+    }
+});
+</script>
+{% endblock %}

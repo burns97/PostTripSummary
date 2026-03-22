@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Post-Trip Summary Wizard{% endblock %}</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            line-height: 1.6;
+            color: #e0e0e0;
+            background: #1a1a2e;
+            min-height: 100vh;
+        }
+
+        /* Step indicator nav bar */
+        .wizard-nav {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 0;
+            padding: 1.2em 2em;
+            background: #16213e;
+            border-bottom: 1px solid #0f3460;
+        }
+        .wizard-step {
+            display: flex;
+            align-items: center;
+            gap: 0.5em;
+            padding: 0.5em 1em;
+            font-size: 0.9em;
+            text-decoration: none;
+            color: #555;
+            cursor: default;
+            border-radius: 4px;
+            transition: color 0.2s;
+        }
+        .wizard-step.completed {
+            color: #2ecc71;
+            cursor: pointer;
+        }
+        .wizard-step.completed:hover {
+            color: #27ae60;
+            background: rgba(46, 204, 113, 0.1);
+        }
+        .wizard-step.current {
+            color: #fff;
+            font-weight: bold;
+        }
+        .wizard-step.locked {
+            color: #555;
+        }
+        .step-number {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            font-size: 0.8em;
+            font-weight: bold;
+        }
+        .wizard-step.completed .step-number {
+            background: #2ecc71;
+            color: #1a1a2e;
+        }
+        .wizard-step.current .step-number {
+            background: #fff;
+            color: #1a1a2e;
+        }
+        .wizard-step.locked .step-number {
+            background: #333;
+            color: #555;
+        }
+        .step-connector {
+            width: 30px;
+            height: 2px;
+            background: #333;
+            margin: 0 0.2em;
+        }
+        .step-connector.done {
+            background: #2ecc71;
+        }
+
+        /* Main content area */
+        .wizard-content {
+            max-width: 900px;
+            margin: 2em auto;
+            padding: 0 2em;
+        }
+        .wizard-content h1 {
+            color: #fff;
+            font-size: 1.8em;
+            margin-bottom: 0.5em;
+        }
+        .wizard-content h2 {
+            color: #ccc;
+            font-size: 1.3em;
+            margin-bottom: 1em;
+            font-weight: normal;
+        }
+
+        /* Common form styles */
+        .form-group {
+            margin-bottom: 1.2em;
+        }
+        .form-group label {
+            display: block;
+            margin-bottom: 0.3em;
+            color: #aaa;
+            font-size: 0.9em;
+        }
+        .form-group input[type="text"],
+        .form-group select {
+            width: 100%;
+            padding: 0.6em 0.8em;
+            background: #16213e;
+            border: 1px solid #0f3460;
+            border-radius: 4px;
+            color: #e0e0e0;
+            font-size: 1em;
+        }
+        .form-group input[type="text"]:focus,
+        .form-group select:focus {
+            outline: none;
+            border-color: #3498db;
+        }
+        .form-group .hint {
+            font-size: 0.8em;
+            color: #666;
+            margin-top: 0.2em;
+        }
+        .btn-primary {
+            padding: 0.7em 2em;
+            background: #3498db;
+            color: #fff;
+            border: none;
+            border-radius: 4px;
+            font-size: 1em;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        .btn-primary:hover {
+            background: #2980b9;
+        }
+        .btn-primary:disabled {
+            background: #555;
+            cursor: not-allowed;
+        }
+
+        {% block extra_css %}{% endblock %}
+    </style>
+</head>
+<body>
+    <nav class="wizard-nav">
+        {% set steps = [
+            ("setup", "Setup"),
+            ("ingest", "Ingest"),
+            ("review", "Review"),
+            ("enrich", "Enrich"),
+            ("highlights", "Highlights"),
+            ("generate", "Generate"),
+        ] %}
+        {% for step_id, step_label in steps %}
+            {% if not loop.first %}
+                <div class="step-connector {% if step_id in completed_steps %}done{% endif %}"></div>
+            {% endif %}
+            {% if step_id in completed_steps %}
+                <a href="/wizard/{{ step_id }}" class="wizard-step completed">
+                    <span class="step-number">{{ loop.index }}</span>
+                    {{ step_label }}
+                </a>
+            {% elif step_id == current_step %}
+                <span class="wizard-step current">
+                    <span class="step-number">{{ loop.index }}</span>
+                    {{ step_label }}
+                </span>
+            {% else %}
+                <span class="wizard-step locked">
+                    <span class="step-number">{{ loop.index }}</span>
+                    {{ step_label }}
+                </span>
+            {% endif %}
+        {% endfor %}
+    </nav>
+
+    <div class="wizard-content">
+        {% block content %}{% endblock %}
+    </div>
+
+    {% block extra_js %}{% endblock %}
+</body>
+</html>
