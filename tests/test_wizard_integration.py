@@ -1,6 +1,7 @@
 """Integration test: create session via CLI, launch wizard, configure inputs."""
 import asyncio
 import time
+from datetime import date, datetime
 from pathlib import Path
 from unittest.mock import patch
 
@@ -11,6 +12,7 @@ from PIL import Image
 
 from post_trip_summary.cli import cli
 from post_trip_summary.config import create_session, load_session
+from post_trip_summary.models import Day, Event, Location, Photo, Trip
 
 
 def test_new_then_start_setup_flow(tmp_path):
@@ -107,3 +109,71 @@ async def test_setup_to_ingest_flow(tmp_path):
     assert state["done"] is True, f"Expected done, got: {state}"
     assert app.state.session.current_stage == "ingested"
     assert app.state.trip is not None
+
+
+def _make_test_trip(tmp_path):
+    """Create a minimal trip with one photo on disk."""
+    img_path = tmp_path / "photo.jpg"
+    img = Image.new("RGB", (100, 100), color="red")
+    img.save(img_path, "JPEG")
+
+    photo = Photo(path=img_path, timestamp=datetime(2026, 3, 5, 16, 0), gps=(48.858, 2.294))
+    event = Event(
+        id="day01-event01",
+        type="landmark",
+        name="Test",
+        time_range=(datetime(2026, 3, 5, 16, 0), datetime(2026, 3, 5, 17, 0)),
+        location=Location(lat=48.858, lon=2.294, name="Test", address=None, city="Paris", country="France"),
+        photos=[photo],
+    )
+    return Trip(
+        name="Test",
+        date_range=(date(2026, 3, 5), date(2026, 3, 5)),
+        days=[Day(date=date(2026, 3, 5), events=[event])],
+    )
+
+
+def test_review_flow(tmp_path):
+    """Integration test: ingested stage -> review page -> edit -> advance to reviewed."""
+    from post_trip_summary.server.app import create_app, _build_event_index
+
+    # 1. Create session at "ingested" stage with a test trip loaded
+    session = create_session("review-flow-trip", base_dir=tmp_path)
+    session.current_stage = "ingested"
+    session.save()
+
+    app = create_app(session)
+    app.state.trip = _make_test_trip(tmp_path)
+    app.state.event_index = _build_event_index(app.state.trip)
+
+    client = TestClient(app)
+
+    # 2. Review page renders and contains event data
+    response = client.get("/wizard/review")
+    assert response.status_code == 200
+    assert "day01-event01" in response.text
+
+    # 3. Toggle a photo's kept status (photos start as kept=True by default)
+    response = client.post("/api/toggle-keep", json={"event_id": "day01-event01", "photo_index": 0})
+    assert response.status_code == 200
+    data = response.json()
+    assert data["event_id"] == "day01-event01"
+    assert data["photo_index"] == 0
+    assert data["is_kept"] is False  # toggled from True to False
+
+    # 4. Rename the event
+    response = client.post("/api/skeleton/rename", json={"event_id": "day01-event01", "new_name": "Eiffel Tower"})
+    assert response.status_code == 200
+    data = response.json()
+    assert data["new_name"] == "Eiffel Tower"
+    # Confirm the in-memory event was updated
+    assert app.state.trip.days[0].events[0].name == "Eiffel Tower"
+
+    # 5. Advance the stage from "ingested" to "reviewed"
+    response = client.post("/api/stage/advance")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["stage"] == "reviewed"
+
+    # 6. Session is now at stage "reviewed"
+    assert session.current_stage == "reviewed"
