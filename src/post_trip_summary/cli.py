@@ -28,23 +28,13 @@ def cli():
 
 @cli.command()
 @click.argument("name")
-@click.option("--photos", type=click.Path(exists=True, path_type=Path), help="Path to photos directory")
-@click.option("--excel", type=click.Path(exists=True, path_type=Path), help="Path to itinerary Excel file")
 @click.option("--base-dir", type=click.Path(path_type=Path), default=None, hidden=True)
-def new(name: str, photos: Path | None, excel: Path | None, base_dir: Path | None):
+def new(name: str, base_dir: Path | None):
     """Create a new trip session."""
-    base = base_dir or DEFAULT_BASE_DIR
-    session = create_session(name, base_dir=base)
-    click.echo(f"Created session '{session.name}' ({session.slug})")
-    if not photos:
-        photos = Path(click.prompt("Where are your photos?", type=str))
-    session.inputs["photos"] = str(photos)
-    click.echo(f"  Photos: {photos}")
-    if excel:
-        session.inputs["excel"] = str(excel)
-        click.echo(f"  Excel: {excel}")
+    session = create_session(name, base_dir=base_dir)
     session.save()
-    click.echo(f"Session saved. Run 'post-trip-summary resume {session.slug}' to continue.")
+    click.echo(f"Created session: {session.slug}")
+    click.echo(f"Run: post-trip-summary start {session.slug}")
 
 
 @cli.command("list")
@@ -71,17 +61,49 @@ def delete(slug: str, base_dir: Path | None):
         click.echo(f"Deleted session '{slug}'.")
 
 
-STAGE_ORDER = ["new", "setup", "ingested", "reviewed", "enriched", "highlights_done", "generated"]
+@cli.command()
+@click.argument("slug")
+@click.option("--port", default=8765, help="Server port")
+@click.option("--base-dir", type=click.Path(path_type=Path), default=None, hidden=True)
+def start(slug: str, port: int, base_dir: Path | None):
+    """Launch the browser wizard for a trip session."""
+    import webbrowser
+    import uvicorn
+    from post_trip_summary.config import STAGES
+
+    session = load_session(slug, base_dir=base_dir)
+
+    # Check for old-format sessions
+    old_stages = {"ingest", "skeleton", "skeleton_reviewed", "final"}
+    if session.current_stage in old_stages:
+        click.echo(f"Session '{slug}' uses an old stage format ('{session.current_stage}').")
+        click.echo("Please delete and recreate this session:")
+        click.echo(f"  post-trip-summary delete {slug}")
+        click.echo(f"  post-trip-summary new \"{session.name}\"")
+        raise SystemExit(1)
+
+    from post_trip_summary.server.app import create_app
+    app = create_app(session)
+
+    click.echo(f"\nStarting wizard for '{session.name}' at http://localhost:{port}")
+    click.echo("Press Ctrl+C to stop the server.\n")
+    webbrowser.open(f"http://localhost:{port}")
+    uvicorn.run(app, host="127.0.0.1", port=port, log_level="warning")
 
 
 @cli.command()
 @click.argument("slug")
-@click.option("--from", "from_stage", type=click.Choice(
-    ["ingest", "skeleton", "skeleton_reviewed", "enriched"],
-), default=None, help="Restart from this stage (e.g. --from skeleton to rebuild skeleton).")
+@click.option("--port", default=8765, help="Server port")
 @click.option("--base-dir", type=click.Path(path_type=Path), default=None, hidden=True)
-def resume(slug: str, from_stage: str | None, base_dir: Path | None):
-    """Resume a trip session from where you left off."""
+def resume(slug: str, port: int, base_dir: Path | None):
+    """Resume a trip session in the browser wizard (alias for start)."""
+    ctx = click.get_current_context()
+    ctx.invoke(start, slug=slug, port=port, base_dir=base_dir)
+
+
+def _legacy_resume(slug: str, from_stage: str | None, base_dir: Path | None):
+    """Legacy resume logic (kept for reference, not a CLI command)."""
+    from post_trip_summary.config import STAGES as STAGE_ORDER
     base = base_dir or DEFAULT_BASE_DIR
     try:
         session = load_session(slug, base_dir=base)
@@ -136,7 +158,6 @@ def resume(slug: str, from_stage: str | None, base_dir: Path | None):
         if click.confirm("Review skeleton in browser?", default=True):
             def _save_skeleton(t):
                 save_trip(t, session.stage_file("skeleton_reviewed"))
-            # Save initial copy so browser edits persist even if user just closes
             save_trip(trip, session.stage_file("skeleton_reviewed"))
             from post_trip_summary.preview.server import run_preview
             run_preview(trip, save_fn=_save_skeleton, open_path="/review/skeleton")
@@ -161,7 +182,6 @@ def resume(slug: str, from_stage: str | None, base_dir: Path | None):
                 save_trip(t, session.stage_file("skeleton_reviewed"))
             from post_trip_summary.preview.server import run_preview
             run_preview(trip, save_fn=_save_cull, open_path="/review/cull")
-            # Reload after browser review (user may have changed data)
             trip = load_trip(session.stage_file("skeleton_reviewed"))
             kept = sum(1 for d in trip.days for e in d.events for p in e.photos if p.is_kept)
             click.echo(f"Kept {kept}/{total_photos} photos.")
