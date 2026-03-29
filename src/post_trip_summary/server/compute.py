@@ -145,6 +145,25 @@ def run_enrich_pipeline(session: SessionConfig, mode: str = "full", progress_cal
     return trip
 
 
+def run_synthesis_pipeline(session: SessionConfig, progress_callback=None):
+    """Run synthesis on highlight photos' descriptions. Text-only, fast."""
+    start_time = time.time()
+    logger.info("=== Starting synthesis ===")
+    cb = _logging_callback(progress_callback)
+
+    from post_trip_summary.serialization import load_trip
+    # Load from enriched stage (highlights may have been adjusted)
+    trip = load_trip(session.stage_file("enriched"))
+
+    from post_trip_summary.pipeline.enrich import synthesize_event_descriptions
+    trip = synthesize_event_descriptions(trip, progress_callback=cb)
+
+    save_trip(trip, session.stage_file("highlights_done"))
+    elapsed = time.time() - start_time
+    logger.info("=== Synthesis complete in %.1fs ===", elapsed)
+    return trip
+
+
 def _run_skeleton(session, trip_data, progress_callback=None):
     from post_trip_summary.pipeline.skeleton import build_skeleton
     gap = session.settings.get("cluster_time_gap_minutes", 15)

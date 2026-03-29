@@ -249,16 +249,48 @@ async function onNoteBlur(textarea) {
     });
 }
 
-/* --- Continue to next step --- */
+/* --- Continue: run synthesis then advance --- */
 async function continueToNext() {
-    const resp = await fetch('/api/stage/advance', {
+    const btn = document.querySelector('.continue-btn');
+    btn.disabled = true;
+    btn.textContent = 'Synthesizing descriptions...';
+
+    const resp = await fetch('/api/stage/start', {
         method: 'POST', headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({})
+        body: JSON.stringify({stage: 'synthesize'})
     });
-    if (resp.ok) {
-        const data = await resp.json();
-        window.location.href = '/wizard/' + data.next_step;
+    if (!resp.ok) {
+        btn.disabled = false;
+        btn.textContent = 'Continue to Generate';
+        alert('Failed to start synthesis');
+        return;
     }
+
+    // Poll for completion
+    const poll = setInterval(async () => {
+        const pr = await fetch('/api/progress');
+        const reader = pr.body.getReader();
+        const decoder = new TextDecoder();
+        const chunk = await reader.read();
+        reader.cancel();
+        const text = decoder.decode(chunk.value);
+        // Parse SSE data line
+        const match = text.match(/data:\s*(\{.*\})/);
+        if (match) {
+            const state = JSON.parse(match[1]);
+            if (state.done) {
+                clearInterval(poll);
+                window.location.href = '/wizard/generate';
+            } else if (state.failed) {
+                clearInterval(poll);
+                btn.disabled = false;
+                btn.textContent = 'Continue to Generate';
+                alert('Synthesis failed: ' + state.error);
+            } else if (state.label) {
+                btn.textContent = state.label;
+            }
+        }
+    }, 1000);
 }
 
 /* --- Init --- */

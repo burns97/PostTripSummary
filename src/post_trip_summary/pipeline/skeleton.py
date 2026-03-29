@@ -158,7 +158,8 @@ def build_skeleton(
 
     for idx, cluster in enumerate(clusters):
         if progress_callback:
-            progress_callback("skeleton", idx + 1, len(clusters), f"Cluster {idx + 1}")
+            progress_callback("geocoding", idx + 1, len(clusters),
+                            f"Reverse geocoding cluster {idx + 1}/{len(clusters)}...")
         c_date = cluster["time_range"][0].date()
         centroid = cluster["centroid"]
 
@@ -166,6 +167,10 @@ def build_skeleton(
         if centroid:
             geo = reverse_geocode(centroid[0], centroid[1])
             cluster["reverse_geo"] = geo
+            if progress_callback:
+                name = geo.get("name", geo.get("city", ""))
+                progress_callback("geocoding", idx + 1, len(clusters),
+                                f"Found: {name}" if name else f"Geocoded cluster {idx + 1}")
         else:
             geo = {}
             cluster["reverse_geo"] = geo

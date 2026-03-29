@@ -95,7 +95,8 @@ document.getElementById('setup-form').addEventListener('submit', async function(
             errorEl.style.display = 'block';
             return;
         }
-        window.location.href = '/wizard/ingest';
+        // Use replace so the user can't "back" into the setup form mid-ingest
+        window.location.replace('/wizard/ingest');
     } catch (err) {
         errorEl.textContent = 'Network error: ' + err.message;
         errorEl.style.display = 'block';

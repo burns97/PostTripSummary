@@ -323,53 +323,68 @@ def enrich_trip_headless(
         # Select highlights
         _select_highlights(event.photos)
 
-    # --- Pass 2: Synthesize event descriptions from highlight photos ---
-    if not quota_exhausted:
-        from post_trip_summary.vision.prompts import get_prompt
-
-        synth_count = 0
-        for item in enrichment_plan:
-            event = item["event"]
-            described_highlights = [
-                p for p in event.photos
-                if p.is_kept and p.is_highlight and p.ai_description
-            ]
-            if len(described_highlights) < 2:
-                continue
-
-            synth_count += 1
-            _progress("synthesizing", synth_count, 0,
-                      f"Synthesizing: {event.name}")
-
-            desc_lines = [
-                f"{i + 1}. {p.ai_description}"
-                for i, p in enumerate(described_highlights)
-            ]
-            descriptions_text = "\n".join(desc_lines)
-
-            loc = event.location
-            context = build_context(
-                timestamp=event.time_range[0].strftime("%Y-%m-%d %H:%M") if event.time_range else "",
-                city=loc.city if loc else "",
-                country=loc.country if loc else "",
-                poi_name=loc.name if loc and loc.name not in ("Unknown", loc.city, "") else "",
-            )
-
-            prompt = get_prompt(
-                "synthesize",
-                context=context,
-                image_count=len(described_highlights),
-                descriptions=descriptions_text,
-            )
-            try:
-                event.description = provider.synthesize(prompt)
-            except Exception:
-                pass  # Keep the best single description from pass 1
-
     # Select highlights for any events not in the plan
     plan_event_ids = {item["event"].id for item in enrichment_plan}
     for event in all_events:
         if event.id not in plan_event_ids:
             _select_highlights(event.photos)
+
+    return trip
+
+
+def synthesize_event_descriptions(trip: Trip, progress_callback=None) -> Trip:
+    """Synthesize unified event descriptions from highlight photo descriptions.
+
+    This is a text-only pass (no image tokens) that should run AFTER the user
+    has finalized highlight selections. For events with 2+ described highlights,
+    it asks the vision provider to weave the individual descriptions into a
+    cohesive 2-4 sentence event summary.
+    """
+    vs = get_vision_settings()
+    if not vs.get("api_key"):
+        return trip
+
+    provider = create_provider(vs["provider"], api_key=vs.get("api_key"), model=vs.get("model"))
+    from post_trip_summary.vision.prompts import build_context, get_prompt
+
+    all_events = [event for day in trip.days for event in day.events if event.photos]
+    synth_count = 0
+
+    for event in all_events:
+        described_highlights = [
+            p for p in event.photos
+            if p.is_kept and p.is_highlight and p.ai_description
+        ]
+        if len(described_highlights) < 2:
+            continue
+
+        synth_count += 1
+        if progress_callback:
+            progress_callback("synthesizing", synth_count, 0, f"Synthesizing: {event.name}")
+
+        desc_lines = [
+            f"{i + 1}. {p.ai_description}"
+            for i, p in enumerate(described_highlights)
+        ]
+        descriptions_text = "\n".join(desc_lines)
+
+        loc = event.location
+        context = build_context(
+            timestamp=event.time_range[0].strftime("%Y-%m-%d %H:%M") if event.time_range else "",
+            city=loc.city if loc else "",
+            country=loc.country if loc else "",
+            poi_name=loc.name if loc and loc.name not in ("Unknown", loc.city, "") else "",
+        )
+
+        prompt = get_prompt(
+            "synthesize",
+            context=context,
+            image_count=len(described_highlights),
+            descriptions=descriptions_text,
+        )
+        try:
+            event.description = provider.synthesize(prompt)
+        except Exception:
+            pass  # Keep the existing description
 
     return trip

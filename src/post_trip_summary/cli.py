@@ -82,6 +82,14 @@ def start(slug: str, port: int, base_dir: Path | None):
         click.echo(f"  post-trip-summary new \"{session.name}\"")
         raise SystemExit(1)
 
+    # Configure logging so pipeline progress shows in the console
+    import logging
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(name)s] %(message)s",
+        datefmt="%H:%M:%S",
+    )
+
     from post_trip_summary.server.app import create_app
     app = create_app(session)
 

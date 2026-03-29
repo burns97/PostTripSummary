@@ -4,7 +4,8 @@
 {% block extra_css %}
 .progress-container { max-width: 600px; margin: 3rem auto; text-align: center; }
 .progress-card { background: #16213e; border-radius: 12px; padding: 2rem; }
-.stage-title { font-size: 1.3rem; margin-bottom: 1.5rem; }
+.stage-title { font-size: 1.3rem; margin-bottom: 0.5rem; }
+.stage-phase { font-size: 0.95rem; color: #aaa; margin-bottom: 1.5rem; min-height: 1.4em; }
 .progress-bar-track { background: #0f3460; border-radius: 8px; height: 8px; margin: 1rem 0; overflow: hidden; }
 .progress-bar-fill { background: #2ecc71; height: 100%; border-radius: 8px; transition: width 0.3s ease; width: 0%; }
 .progress-bar-fill.indeterminate { width: 30%; animation: slide 1.5s infinite ease-in-out; }
@@ -17,7 +18,8 @@
 {% block content %}
 <div class="progress-container">
   <div class="progress-card">
-    <div class="stage-title" id="stage-title">{{ stage_title }}</div>
+    <div class="stage-title">{{ stage_title }}</div>
+    <div class="stage-phase" id="stage-phase">Starting...</div>
     <div class="progress-bar-track">
       <div class="progress-bar-fill indeterminate" id="progress-bar"></div>
     </div>
@@ -32,17 +34,21 @@
 <script>
 const phaseLabels = {
   scanning: "Scanning Photos",
-  scoring: "Scoring Quality",
+  scoring: "Scoring Photo Quality",
   supplementary: "Parsing Data Sources",
-  skeleton: "Building Skeleton",
+  geocoding: "Reverse Geocoding Clusters",
+  skeleton: "Building Trip Skeleton",
+  clustering: "Clustering Photos",
 };
+
+const startTime = Date.now();
 
 function connectSSE() {
   const source = new EventSource("/api/progress");
   const bar = document.getElementById("progress-bar");
   const label = document.getElementById("progress-label");
   const stats = document.getElementById("progress-stats");
-  const title = document.getElementById("stage-title");
+  const phase = document.getElementById("stage-phase");
   const errorEl = document.getElementById("error-message");
 
   source.addEventListener("state", function(e) {
@@ -52,7 +58,8 @@ function connectSSE() {
       source.close();
       bar.classList.remove("indeterminate");
       bar.style.width = "100%";
-      label.textContent = "Complete!";
+      phase.textContent = "Complete!";
+      label.textContent = "Redirecting...";
       setTimeout(() => { window.location.href = "/wizard/" + (state.next_stage || "review"); }, 1000);
       return;
     }
@@ -62,24 +69,31 @@ function connectSSE() {
       bar.classList.remove("indeterminate");
       bar.style.width = "0%";
       bar.style.background = "#e74c3c";
-      label.textContent = "Failed";
+      phase.textContent = "Failed";
+      label.textContent = "";
       errorEl.textContent = state.error;
       errorEl.style.display = "block";
       return;
     }
 
     if (state.phase) {
-      title.textContent = phaseLabels[state.phase] || state.phase;
+      phase.textContent = phaseLabels[state.phase] || state.phase;
     }
+
+    // Elapsed time
+    const elapsed = Math.round((Date.now() - startTime) / 1000);
+    const mins = Math.floor(elapsed / 60);
+    const secs = elapsed % 60;
+    const timeStr = mins > 0 ? mins + "m " + secs + "s" : secs + "s";
 
     if (state.total > 0) {
       const pct = Math.round((state.current / state.total) * 100);
       bar.classList.remove("indeterminate");
       bar.style.width = pct + "%";
-      stats.textContent = state.current + " / " + state.total;
+      stats.textContent = state.current + " / " + state.total + "  (" + timeStr + " elapsed)";
     } else {
       bar.classList.add("indeterminate");
-      stats.textContent = "";
+      stats.textContent = timeStr + " elapsed";
     }
 
     label.textContent = state.label || "";
