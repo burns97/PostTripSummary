@@ -234,6 +234,75 @@ def _enrich_few_photos(event, photos, provider, context):
         p.is_highlight = True
 
 
+def _enrich_thorough_pass(all_events, provider, progress_fn, event_count):
+    """Pass 2+3: Individual highlight descriptions then narrative synthesis."""
+    import json
+    from post_trip_summary.vision.gemini import QuotaExhaustedError
+    from post_trip_summary.vision.prompts import build_context, get_prompt
+
+    # Pass 2 — Individual highlight descriptions
+    for event_idx, event in enumerate(all_events, 1):
+        progress_fn("thorough", event_idx, event_count,
+                     f"[{event_idx}/{event_count}] Details: {event.name}")
+
+        highlights = [p for p in event.photos if p.is_highlight and p.is_kept]
+        if not highlights:
+            continue
+
+        loc = event.location
+        context = build_context(
+            timestamp=event.time_range[0].strftime("%Y-%m-%d %H:%M") if event.time_range else "",
+            city=loc.city if loc else "",
+            country=loc.country if loc else "",
+            poi_name=loc.name if loc and loc.name not in ("Unknown", loc.city, "") else "",
+        )
+
+        for photo in highlights:
+            try:
+                image_data, media_type = _read_image(photo.path)
+                result = provider.analyze(image_data, media_type, "scene", context=context)
+                photo.ai_description = result.description
+            except QuotaExhaustedError:
+                return  # Stop early
+            except Exception:
+                pass  # Skip this photo
+
+    # Pass 3 — Narrative synthesis
+    for event in all_events:
+        if not event.summary:
+            continue
+
+        described = [p for p in event.photos if p.is_highlight and p.is_kept and p.ai_description]
+        if len(described) < 2:
+            continue
+
+        loc = event.location
+        context = build_context(
+            timestamp=event.time_range[0].strftime("%Y-%m-%d %H:%M") if event.time_range else "",
+            city=loc.city if loc else "",
+            country=loc.country if loc else "",
+            poi_name=loc.name if loc and loc.name not in ("Unknown", loc.city, "") else "",
+        )
+
+        desc_lines = [f"{i + 1}. {p.ai_description}" for i, p in enumerate(described)]
+        descriptions_text = "\n".join(desc_lines)
+
+        prompt = get_prompt(
+            "narrative",
+            context=context,
+            montage_summary=event.summary,
+            descriptions=descriptions_text,
+        )
+        try:
+            raw = provider.synthesize(prompt)
+            parsed = json.loads(raw)
+            narrative = parsed.get("narrative", "")
+            if narrative:
+                event.description = narrative
+        except Exception:
+            pass  # Keep existing description
+
+
 def enrich_trip_headless(
     trip: Trip,
     mode: str = "quick",
@@ -347,8 +416,8 @@ def enrich_trip_headless(
                 _select_highlights(event.photos)
 
     # Thorough mode: additional per-photo pass (Task 6)
-    if mode == "thorough":
-        pass  # _enrich_thorough_pass will be added in Task 6
+    if mode == "thorough" and not quota_exhausted:
+        _enrich_thorough_pass(all_events, provider, _progress, event_count)
 
     _progress("done", event_count, event_count, "Enrichment complete")
     return trip

@@ -74,6 +74,39 @@ class TestQuickMode:
         assert mock_provider.analyze.call_count >= 1
 
 
+class TestThoroughMode:
+    @patch("post_trip_summary.pipeline.enrich.create_provider")
+    @patch("post_trip_summary.pipeline.enrich.get_vision_settings")
+    def test_thorough_sends_individual_photos_after_montage(self, mock_settings, mock_create, tmp_path):
+        from post_trip_summary.pipeline.enrich import enrich_trip_headless
+        mock_settings.return_value = {"provider": "gemini", "api_key": "fake", "model": "gemini-2.5-flash"}
+        mock_provider = MagicMock()
+        mock_provider.analyze_montage.return_value = {"summary": "Toured the set.", "highlights": [1, 3, 5]}
+        mock_provider.analyze.return_value = MagicMock(description="A hobbit hole.", landmark=None, confidence="medium")
+        mock_provider.synthesize.return_value = '{"narrative": "We walked through the magical Hobbiton set."}'
+        mock_create.return_value = mock_provider
+        trip = _trip_with_event(tmp_path, photo_count=10)
+        result = enrich_trip_headless(trip, mode="thorough")
+        event = result.days[0].events[0]
+        assert event.summary == "Toured the set."
+        # Individual analyze should have been called for highlights
+        assert mock_provider.analyze.call_count >= 1
+
+    @patch("post_trip_summary.pipeline.enrich.create_provider")
+    @patch("post_trip_summary.pipeline.enrich.get_vision_settings")
+    def test_thorough_calls_synthesize(self, mock_settings, mock_create, tmp_path):
+        from post_trip_summary.pipeline.enrich import enrich_trip_headless
+        mock_settings.return_value = {"provider": "gemini", "api_key": "fake", "model": "gemini-2.5-flash"}
+        mock_provider = MagicMock()
+        mock_provider.analyze_montage.return_value = {"summary": "Toured the set.", "highlights": [1, 3]}
+        mock_provider.analyze.return_value = MagicMock(description="A detailed scene.", landmark=None, confidence="medium")
+        mock_provider.synthesize.return_value = '{"narrative": "A rich journal narrative."}'
+        mock_create.return_value = mock_provider
+        trip = _trip_with_event(tmp_path, photo_count=8)
+        result = enrich_trip_headless(trip, mode="thorough")
+        mock_provider.synthesize.assert_called_once()
+
+
 class TestSkipMode:
     def test_skip_mode_selects_highlights_only(self, tmp_path):
         from post_trip_summary.pipeline.enrich import enrich_trip_headless
