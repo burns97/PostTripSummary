@@ -215,21 +215,46 @@ def enrich_trip(trip: Trip, auto_approve: bool = False) -> Trip:
     return trip
 
 
+def _enrich_few_photos(event, photos, provider, context):
+    """Enrich events with <=3 photos by sending individually."""
+    descriptions = []
+    for photo in photos:
+        try:
+            image_data, media_type = _read_image(photo.path)
+            result = provider.analyze(image_data, media_type, "scene", context=context)
+            photo.ai_description = result.description
+            if result.description:
+                descriptions.append(result.description)
+        except Exception:
+            pass
+    if descriptions:
+        event.summary = descriptions[0]
+        event.description = descriptions[0]
+    for p in photos:
+        p.is_highlight = True
+
+
 def enrich_trip_headless(
     trip: Trip,
-    mode: str = "full",
+    mode: str = "quick",
     progress_callback=None,
 ) -> Trip:
     """Run vision enrichment without CLI interaction.
 
     Args:
         trip: The trip to enrich.
-        mode: "full" (all photos), "reduced" (non-scene only), or "skip" (highlights only).
+        mode: "quick" (montage-based), "thorough" (montage + per-photo),
+              or "skip" (highlights only). Legacy aliases: "full" -> "thorough",
+              "reduced" -> "quick".
         progress_callback: Optional callable(phase, current, total, label).
 
     Returns:
         The enriched trip.
     """
+    # Backward-compatible mode mapping
+    _mode_aliases = {"full": "thorough", "reduced": "quick"}
+    mode = _mode_aliases.get(mode, mode)
+
     def _progress(phase, current, total, label=""):
         if progress_callback:
             progress_callback(phase, current, total, label)
@@ -253,33 +278,17 @@ def enrich_trip_headless(
 
     provider = create_provider(vs["provider"], api_key=vs.get("api_key"), model=vs.get("model"))
 
-    # Plan enrichment
-    enrichment_plan = plan_enrichment(all_events)
-    total_images = sum(len(item["photos"]) for item in enrichment_plan)
-
-    if mode == "reduced":
-        enrichment_plan = [p for p in enrichment_plan if p["purpose"] != "scene"]
-        total_images = sum(len(item["photos"]) for item in enrichment_plan)
-
-    if total_images == 0:
-        for event in all_events:
-            _select_highlights(event.photos)
-        _progress("done", 0, 0, "No photos need analysis")
-        return trip
-
-    # --- Pass 1: Per-photo analysis ---
     from post_trip_summary.vision.gemini import QuotaExhaustedError
+    from post_trip_summary.vision.montage import build_montage
     from post_trip_summary.vision.prompts import build_context
 
-    analyzed = 0
-    failed = 0
     quota_exhausted = False
-    event_count = len(enrichment_plan)
+    event_count = len(all_events)
 
-    for event_idx, item in enumerate(enrichment_plan, 1):
-        event = item["event"]
-        photos = item["photos"]
-        purpose = item["purpose"]
+    for event_idx, event in enumerate(all_events, 1):
+        kept = [p for p in event.photos if p.is_kept]
+        if not kept:
+            continue
 
         loc = event.location
         context = build_context(
@@ -289,46 +298,59 @@ def enrich_trip_headless(
             poi_name=loc.name if loc and loc.name not in ("Unknown", loc.city, "") else "",
         )
 
-        best_description = ""
-        best_landmark = None
-
-        _progress("analyzing", analyzed, total_images,
+        _progress("analyzing", event_idx, event_count,
                   f"[{event_idx}/{event_count}] {event.name}")
 
-        for photo in photos:
-            if quota_exhausted:
-                break
+        if quota_exhausted:
+            _select_highlights(event.photos)
+            continue
+
+        if len(kept) <= 3:
+            # Few photos: send individually
             try:
-                image_data, media_type = _read_image(photo.path)
-                result = provider.analyze(image_data, media_type, purpose, context=context)
-                photo.ai_description = result.description
-                analyzed += 1
-                if result.landmark and not best_landmark:
-                    best_landmark = result.landmark
-                if result.description and not best_description:
-                    best_description = result.description
-                _progress("analyzing", analyzed, total_images,
-                          f"[{event_idx}/{event_count}] {event.name}")
+                _enrich_few_photos(event, kept, provider, context)
             except QuotaExhaustedError:
                 quota_exhausted = True
+                _select_highlights(event.photos)
+                continue
+        else:
+            # Many photos: build montage
+            try:
+                montage_data, photo_map = build_montage(kept)
+                result = provider.analyze_montage(
+                    montage_data,
+                    media_type="image/jpeg",
+                    purpose="montage",
+                    context=context,
+                    image_count=len(photo_map),
+                )
+                summary = result.get("summary", "")
+                highlights = result.get("highlights", [])
+
+                event.summary = summary
+                event.description = summary
+
+                # Mark highlights from montage picks
+                for num in highlights:
+                    if num in photo_map:
+                        photo_map[num].is_highlight = True
+
+                # If no highlights were picked, fall back to _select_highlights
+                if not any(p.is_highlight for p in event.photos):
+                    _select_highlights(event.photos)
+
+            except QuotaExhaustedError:
+                quota_exhausted = True
+                _select_highlights(event.photos)
+                continue
             except Exception:
-                failed += 1
+                _select_highlights(event.photos)
 
-        # Update event
-        if best_description and not event.description:
-            event.description = best_description
-        if best_landmark and event.name in ("Unknown", event.location.city, ""):
-            event.name = best_landmark
+    # Thorough mode: additional per-photo pass (Task 6)
+    if mode == "thorough":
+        pass  # _enrich_thorough_pass will be added in Task 6
 
-        # Select highlights
-        _select_highlights(event.photos)
-
-    # Select highlights for any events not in the plan
-    plan_event_ids = {item["event"].id for item in enrichment_plan}
-    for event in all_events:
-        if event.id not in plan_event_ids:
-            _select_highlights(event.photos)
-
+    _progress("done", event_count, event_count, "Enrichment complete")
     return trip
 
 
