@@ -7,3 +7,4 @@ exiftool_files/*
 .claude/*
 scripts/*
 src/post_trip_summary.egg-info/*
+.worktrees/
