@@ -238,3 +238,33 @@ def test_highlights_flow(tmp_path):
 
     # 4. Session reflects the new stage
     assert session.current_stage == "highlights_done"
+
+
+def test_enrich_quick_mode_passes_through(tmp_path):
+    """Integration test: verify quick mode is passed through to enrichment pipeline."""
+    from post_trip_summary.server.app import create_app, _build_event_index
+
+    session = create_session("enrich-mode-trip", base_dir=tmp_path)
+    session.current_stage = "reviewed"
+    session.save()
+
+    app = create_app(session)
+    app.state.trip = _make_test_trip(tmp_path)
+    app.state.event_index = _build_event_index(app.state.trip)
+
+    client = TestClient(app)
+
+    # Mock the run_enrich_pipeline function to verify it's called with mode="quick"
+    with patch("post_trip_summary.server.compute.run_enrich_pipeline") as mock_run:
+        mock_run.return_value = app.state.trip
+
+        response = client.post("/api/stage/start", json={"stage": "enrich", "mode": "quick"})
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "started"
+
+        # Verify the mock was called with the correct mode
+        mock_run.assert_called_once()
+        call_args = mock_run.call_args
+        # run_enrich_pipeline(session, mode, progress_callback)
+        assert call_args[0][1] == "quick"  # Second positional argument is mode
