@@ -85,8 +85,8 @@ def enrich_trip(trip: Trip, auto_approve: bool = False) -> Trip:
 
     if not auto_approve:
         choice = click.prompt(
-            "\n[a]pprove / [r]educe scope / [s]kip enrichment",
-            type=str, default="a",
+            "\n[q]uick / [t]horough / [s]kip enrichment",
+            type=str, default="q",
         ).lower().strip()
 
         if choice in ("s", "skip"):
@@ -94,6 +94,8 @@ def enrich_trip(trip: Trip, auto_approve: bool = False) -> Trip:
             for event in all_events:
                 _select_highlights(event.photos)
             return trip
+        elif choice in ("t", "thorough"):
+            click.echo("Running thorough enrichment (all events).")
         elif choice in ("r", "reduce"):
             click.echo("Reducing to most uncertain events only.")
             enrichment_plan = [p for p in enrichment_plan if p["purpose"] != "scene"]
