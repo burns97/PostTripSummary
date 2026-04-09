@@ -17,7 +17,7 @@ A CLI tool that generates trip summaries from vacation photos and supplementary 
 1. **Ingest** — Parse photos (EXIF/GPS), Excel itinerary, credit card CSV, Google Maps JSON, Apple Health XML, Day One JSON
 2. **Skeleton** — Cluster photos by time+GPS, reverse geocode centroids (Nominatim), cross-reference with supplementary data, build Day/Event timeline
 3. **Review Skeleton** — Interactive CLI review of auto-generated skeleton
-4. **Enrich** — Vision API (Gemini or Claude) describes highlight photos
+4. **Enrich** — Montage-based vision analysis (Gemini). Quick mode: one montage per event for factual summaries. Thorough mode: montages + individual highlight descriptions + journal-style narratives.
 5. **Review Details** — Interactive detail review
 6. **Generate** — Output detailed record HTML, shareable PDF, blog post, photo prep
 
@@ -48,8 +48,9 @@ src/post_trip_summary/
     review_skeleton.py
     review_details.py
   vision/
-    client.py         # Claude vision API client
+    client.py         # Vision provider abstraction (Claude, Gemini)
     gemini.py         # Gemini vision provider
+    montage.py        # Thumbnail grid generation for montage-based analysis
     triage.py         # Photo dedup and highlight selection
     prompts.py        # Vision prompt templates
   output/             # Generators: detailed_record, shareable_pdf, blog_post, photo_prep
