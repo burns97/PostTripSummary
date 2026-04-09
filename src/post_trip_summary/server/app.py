@@ -214,31 +214,48 @@ def create_app(session: SessionConfig) -> FastAPI:
     def enrich_estimate():
         if app.state.trip is None:
             raise HTTPException(404, "No trip loaded")
-        from post_trip_summary.vision.triage import plan_enrichment, estimate_batch_cost
         from post_trip_summary.vision.client import create_provider as _create_provider
         vs = get_vision_settings()
+
+        # Collect all events with photos
         all_events = [e for d in app.state.trip.days for e in d.events if e.photos]
-        plan = plan_enrichment(all_events)
-        total = sum(len(item["photos"]) for item in plan)
-        reduced_plan = [p for p in plan if p["purpose"] != "scene"]
-        reduced_total = sum(len(item["photos"]) for item in reduced_plan)
+
+        # Montage-based counting: separate montage events (>3 kept) from few-photo events (<=3 kept)
+        montage_events = []
+        few_photo_calls = 0
+
+        for event in all_events:
+            kept_photos = [p for p in event.photos if p.is_kept]
+            if len(kept_photos) > 3:
+                montage_events.append(event)
+            else:
+                few_photo_calls += len(kept_photos)
+
+        # Quick mode: montage event count (one call per montage event) + few-photo individual calls
+        quick_total = len(montage_events) + few_photo_calls
+
+        # Thorough mode: quick + (montage_events * 5 for highlights per-photo calls) + montage_events for synthesis
+        thorough_total = quick_total + (len(montage_events) * 5) + len(montage_events)
+
         cost = 0.0
         if vs.get("api_key"):
             try:
                 provider = _create_provider(
                     vs["provider"], api_key=vs.get("api_key"), model=vs.get("model")
                 )
-                cost = estimate_batch_cost(total, provider)
+                # Use quick mode total for cost estimation
+                cost = provider.estimate_cost(quick_total)
             except Exception:
                 pass
+
         return JSONResponse({
             "provider": vs.get("provider", "gemini"),
             "model": vs.get("model", ""),
-            "total_images": total,
-            "reduced_images": reduced_total,
+            "total_images": quick_total,
+            "reduced_images": thorough_total,
             "estimated_cost": cost,
             "has_api_key": bool(vs.get("api_key")),
-            "event_count": len(plan),
+            "event_count": len(all_events),
         })
 
     @app.post("/api/stage/start")
@@ -274,7 +291,7 @@ def create_app(session: SessionConfig) -> FastAPI:
             return JSONResponse({"status": "started"})
 
         elif stage == "enrich":
-            mode = body.get("mode", "full")
+            mode = body.get("mode", "quick")
             tracker = ProgressTracker()
             app.state.progress = tracker
 
