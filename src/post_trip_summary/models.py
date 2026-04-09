@@ -35,6 +35,7 @@ class Event:
     location: Location
     photos: list[Photo] = field(default_factory=list)
     description: str = ""
+    summary: str = ""
     notes: str = ""
     sources: list[str] = field(default_factory=list)
     name_candidates: dict[str, str] = field(default_factory=dict)
