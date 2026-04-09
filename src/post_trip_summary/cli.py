@@ -251,6 +251,26 @@ def config():
         click.edit(filename=str(settings_path))
 
 
+@cli.command("clear-cache")
+@click.option("--geo", is_flag=True, help="Clear the geocoding cache")
+@click.option("--all", "clear_all", is_flag=True, help="Clear all caches")
+def clear_cache(geo: bool, clear_all: bool):
+    """Clear cached data (geocoding results, etc.)."""
+    if not geo and not clear_all:
+        click.echo("Specify what to clear: --geo or --all")
+        click.echo("  --geo   Clear geocoding cache (forces fresh Nominatim/LocationIQ/Overpass lookups)")
+        click.echo("  --all   Clear all caches")
+        return
+
+    from post_trip_summary.geo.cache import GeoCache
+
+    if geo or clear_all:
+        cache = GeoCache()
+        count = len(cache)
+        cache.clear()
+        click.echo(f"Cleared geocoding cache ({count} entries)")
+
+
 @cli.command("add-input")
 @click.argument("slug")
 @click.option("--photos", type=click.Path(exists=True, path_type=Path))

@@ -217,13 +217,58 @@ def build_skeleton(
         # 4. Day One entry name
         # 5. Fall back to area name from geocode
         geo_poi = geo.get("poi_name", "")
+        overpass_poi = geo.get("overpass_poi_name", "")
         geo_area = geo.get("area_name", "") or geo.get("city", "")
+
+        # Collect all name candidates for the review UI
+        name_candidates = {}
+        if google_match and google_match.get("name"):
+            name_candidates["Google Maps"] = google_match["name"]
+        if geo_poi:
+            name_candidates["Geocode POI"] = geo_poi
+        # Add individual geocoder POI fields as separate candidates when they differ
+        for field_label, field_key in [
+            ("Tourism", "tourism"), ("Amenity", "amenity"),
+            ("Leisure", "leisure"), ("Historic", "historic"),
+        ]:
+            val = geo.get(field_key, "")
+            if val and val != geo_poi:
+                name_candidates[field_label] = val
+        # Add top Overpass results (not just the best one)
+        overpass_pois = geo.get("overpass_pois", [])
+        seen_names = set(name_candidates.values())
+        for i, poi in enumerate(overpass_pois[:5]):
+            if poi["name"] not in seen_names:
+                label = f"Nearby: {poi['category']}" if i == 0 else f"Nearby: {poi['category']} ({i+1})"
+                name_candidates[label] = poi["name"]
+                seen_names.add(poi["name"])
+        if itinerary_match and itinerary_match.get("name"):
+            name_candidates["Itinerary"] = itinerary_match["name"]
+        if dayone_name:
+            name_candidates["Day One"] = dayone_name
+        if geo_area:
+            name_candidates["Area"] = geo_area
+
+        # Prefer Overpass "destination" POI (attraction, museum, etc.) over
+        # a geocoder POI that's a minor feature inside it (e.g.,
+        # "Hobbiton Movie Set Tour" over "Vegetable Gardens" inside it)
+        overpass_destination = ""
+        for op in overpass_pois:
+            if op.get("category") == "tourism" and op.get("type") in (
+                "attraction", "museum", "gallery", "theme_park", "zoo", "aquarium",
+            ):
+                overpass_destination = op["name"]
+                break
 
         if google_match:
             name = google_match.get("name", "")
             sources.append("google_maps")
+        elif overpass_destination and overpass_destination != geo_poi:
+            name = overpass_destination
         elif geo_poi:
             name = geo_poi
+        elif overpass_poi:
+            name = overpass_poi
         elif itinerary_match:
             name = itinerary_match.get("name", "")
         elif dayone_name:
@@ -278,6 +323,7 @@ def build_skeleton(
             description="",
             notes="",
             sources=sources,
+            name_candidates=name_candidates,
         )
         events_by_date[c_date].append(event)
 

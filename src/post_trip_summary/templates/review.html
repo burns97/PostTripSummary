@@ -67,6 +67,11 @@
 }
 .event-name-input:hover { border-color: #444; }
 .event-name-input:focus { border-color: #2ecc71; outline: none; background: #0f3460; }
+.name-candidate-select {
+    background: #1a1a2e; color: #aaa; border: 1px solid #333; border-radius: 4px;
+    font-size: 0.75rem; padding: 0.1rem 0.2rem; cursor: pointer; max-width: 140px;
+}
+.name-candidate-select:hover { border-color: #2ecc71; color: #eee; }
 .event-time { color: #888; font-size: 0.85rem; white-space: nowrap; }
 .photo-count-badge {
     font-size: 0.75rem; background: #0f3460; padding: 0.15rem 0.5rem;
@@ -193,6 +198,14 @@
             <input type="text" class="event-name-input" value="{{ event.name }}"
                    data-event-id="{{ event.id }}" data-original="{{ event.name }}"
                    onblur="onRenameBlur(this)" onkeydown="if(event.key==='Enter')this.blur()">
+            {% if event.name_candidates and event.name_candidates|length > 1 %}
+            <select class="name-candidate-select" data-event-id="{{ event.id }}" onchange="onCandidateSelect(this)">
+                <option value="">alternatives...</option>
+                {% for source, candidate in event.name_candidates.items() %}
+                <option value="{{ candidate }}" {% if candidate == event.name %}selected{% endif %}>{{ candidate }} ({{ source }})</option>
+                {% endfor %}
+            </select>
+            {% endif %}
             <span class="event-time">{{ event.time_range[0].strftime("%H:%M") }} – {{ event.time_range[1].strftime("%H:%M") }}</span>
             {% if event.photos %}
             <span class="photo-count-badge">{{ event.photos | length }} photos</span>
@@ -328,6 +341,19 @@ async function onRenameBlur(input) {
     });
     if (resp.ok) { input.dataset.original = newName; }
     else { input.value = original; }
+}
+
+function onCandidateSelect(select) {
+    const candidate = select.value;
+    if (!candidate) return;
+    const eventId = select.dataset.eventId;
+    const nameInput = select.parentElement.querySelector('.event-name-input');
+    if (nameInput) {
+        nameInput.value = candidate;
+        nameInput.focus();
+        nameInput.blur();  // triggers onRenameBlur to save
+    }
+    select.selectedIndex = 0;  // reset to "alternatives..." placeholder
 }
 
 /* --- Skeleton: delete --- */

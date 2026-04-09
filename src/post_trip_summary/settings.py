@@ -23,6 +23,11 @@ DEFAULT_SETTINGS = {
         "claude_api_key": "",
         "claude_model": "claude-sonnet-4-20250514",
     },
+    "geocoding": {
+        "locationiq_api_key": "",
+        "overpass_enabled": True,
+        "overpass_radius_m": 300,
+    },
 }
 
 _DEFAULT_TOML = """\
@@ -37,6 +42,16 @@ gemini_model = "gemini-2.5-flash"
 # Claude settings (or set ANTHROPIC_API_KEY env var)
 claude_api_key = ""
 claude_model = "claude-sonnet-4-20250514"
+
+[geocoding]
+# LocationIQ API key for faster geocoding (or set LOCATIONIQ_API_KEY env var)
+# Free tier: 5,000 requests/day at 2 req/sec
+# If not set, falls back to Nominatim (1 req/sec, no key needed)
+locationiq_api_key = ""
+
+# Overpass API for supplementary POI lookup
+overpass_enabled = true
+overpass_radius_m = 300
 """
 
 
@@ -113,4 +128,16 @@ def get_vision_settings(settings_file: Path | None = None) -> dict:
         "provider": provider,
         "api_key": api_key or None,
         "model": model,
+    }
+
+
+def get_geocoding_settings(settings_file: Path | None = None) -> dict:
+    """Return geocoding settings with env var fallback for API key."""
+    settings = load_settings(settings_file)
+    geo = settings["geocoding"]
+    api_key = geo.get("locationiq_api_key", "") or os.environ.get("LOCATIONIQ_API_KEY", "")
+    return {
+        "locationiq_api_key": api_key or None,
+        "overpass_enabled": geo.get("overpass_enabled", True),
+        "overpass_radius_m": geo.get("overpass_radius_m", 75),
     }

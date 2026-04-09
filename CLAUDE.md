@@ -63,9 +63,10 @@ All models are plain dataclasses — no ORM, no Pydantic. Key types: `Trip`, `Da
 
 ### External Services
 
-- **Nominatim** (geopy): Reverse geocoding. Rate-limited to 1 req/sec. Results cached via `@lru_cache`. Called once per photo cluster centroid.
+- **Reverse geocoding** (geopy): LocationIQ (2 req/sec, free 5K/day) if API key configured, otherwise Nominatim (1 req/sec). Auto-fallback to Nominatim on LocationIQ failure. Results cached in SQLite at `~/.post-trip-summary/geocache.db`.
+- **Overpass API** (OSM): Supplementary POI radius search when geocoder returns no POI name. Finds nearby tourism/amenity/historic/leisure features. Free, no API key.
 - **Vision APIs** (Gemini/Claude): Photo description for enrichment. Pluggable provider via settings. Cost-gated.
-- No database. Session state is JSON files on disk.
+- Geocache is SQLite; session state is JSON files on disk.
 
 ## Conventions
 

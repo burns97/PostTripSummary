@@ -23,6 +23,7 @@ dependencies = [
     "uvicorn>=0.32",
     "staticmap>=0.5",
     "sse-starlette>=2.0",
+    "requests>=2.28",
 ]
 
 [project.scripts]

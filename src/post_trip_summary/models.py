@@ -37,6 +37,7 @@ class Event:
     description: str = ""
     notes: str = ""
     sources: list[str] = field(default_factory=list)
+    name_candidates: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass

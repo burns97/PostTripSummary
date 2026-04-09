@@ -144,7 +144,14 @@
     <div class="event-top">
       <input type="checkbox" class="event-check" data-event-id="{{ event.id }}" data-day-index="{{ day_idx }}" onchange="updateSelection()">
       <span class="type-icon">{{ type_icons.get(event.type, "\u2753") }}</span>
-      <input type="text" class="event-name-input" value="{{ event.name }}" data-event-id="{{ event.id }}" data-original="{{ event.name }}" onblur="onRenameBlur(this)" onkeydown="if(event.key==='Enter')this.blur()">
+      <input type="text" class="event-name-input" value="{{ event.name }}" data-event-id="{{ event.id }}" data-original="{{ event.name }}" list="candidates-{{ event.id }}" onblur="onRenameBlur(this)" onkeydown="if(event.key==='Enter')this.blur()">
+      {% if event.name_candidates %}
+      <datalist id="candidates-{{ event.id }}">
+        {% for source, candidate in event.name_candidates.items() %}
+        <option value="{{ candidate }}">{{ source }}</option>
+        {% endfor %}
+      </datalist>
+      {% endif %}
       <span class="event-time">{{ event.time_range[0]|ftime }} – {{ event.time_range[1]|ftime }}</span>
       {% if event.photos %}
       <span class="photo-count">{{ event.photos | length }} photos</span>
@@ -287,7 +294,8 @@ function renderDay(details, dayIndex, events) {
       <div class="event-top">
         <input type="checkbox" class="event-check" data-event-id="${ev.id}" data-day-index="${dayIndex}" onchange="updateSelection()">
         <span class="type-icon">${icon}</span>
-        <input type="text" class="event-name-input" value="${ev.name}" data-event-id="${ev.id}" data-original="${ev.name}" onblur="onRenameBlur(this)" onkeydown="if(event.key==='Enter')this.blur()">
+        <input type="text" class="event-name-input" value="${ev.name}" data-event-id="${ev.id}" data-original="${ev.name}" list="candidates-${ev.id}" onblur="onRenameBlur(this)" onkeydown="if(event.key==='Enter')this.blur()">
+        ${ev.name_candidates && Object.keys(ev.name_candidates).length ? `<datalist id="candidates-${ev.id}">${Object.entries(ev.name_candidates).map(([src, name]) => `<option value="${name}">${src}</option>`).join('')}</datalist>` : ''}
         <span class="event-time">${ev.time_range}</span>
         ${photoCount ? `<span class="photo-count">${photoCount} photos</span>` : ''}
         <span class="source-badges">${sources}</span>

@@ -30,6 +30,7 @@ def _serialize_event(event):
         "sources": event.sources,
         "notes": event.notes or "",
         "thumb_urls": [f"/photos/{event.id}/{i}" for i in range(min(8, len(event.photos)))],
+        "name_candidates": getattr(event, "name_candidates", {}),
     }
 
 
