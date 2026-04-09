@@ -1,7 +1,7 @@
 # src/post_trip_summary/vision/prompts.py
 """Prompt templates for vision API calls."""
 
-PURPOSES = ("landmark", "sign", "scene", "synthesize")
+PURPOSES = ("landmark", "sign", "scene", "synthesize", "montage", "narrative")
 
 _PROMPTS = {
     "landmark": """Analyze this photo and identify any landmarks or notable locations.
@@ -41,6 +41,32 @@ Write a unified 2-4 sentence paragraph for a trip journal that synthesizes these
 Respond with JSON only:
 {{
   "description": "Unified 2-4 sentence paragraph for a trip journal"
+}}""",
+
+    "montage": """Here are {image_count} photos from a single event during a vacation trip, shown as a numbered grid.
+{context}
+Describe what was seen and done across these photos. Focus on the overall experience, not individual photos. 2-3 sentences, suitable for a trip summary.
+
+Also pick up to 5 of the most interesting/representative photos by their grid number.
+
+Respond with JSON only:
+{{
+  "summary": "factual 2-3 sentence summary of the event",
+  "highlights": [3, 7, 12]
+}}""",
+
+    "narrative": """Here is a factual summary of an event, plus detailed descriptions of key photos:
+
+Summary: {montage_summary}
+
+Photo details:
+{descriptions}
+{context}
+Write a 3-5 sentence journal-style narrative that brings this event to life. Blend the overview with specific details from the photos.
+
+Respond with JSON only:
+{{
+  "narrative": "journal-style paragraph"
 }}""",
 }
 
