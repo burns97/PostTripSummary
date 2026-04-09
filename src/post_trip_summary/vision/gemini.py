@@ -127,6 +127,64 @@ class GeminiProvider(VisionProvider):
 
         raise last_error
 
+    def analyze_montage(
+        self,
+        image_data: bytes,
+        media_type: str = "image/jpeg",
+        purpose: str = "montage",
+        context: str = "",
+        image_count: int = 0,
+        max_retries: int = 3,
+    ) -> dict:
+        """Analyze a montage image. Returns dict with 'summary' and 'highlights' keys."""
+        from google.genai import types
+        from post_trip_summary.vision.prompts import get_prompt
+
+        prompt = get_prompt(purpose, context=context, image_count=image_count)
+        contents = [
+            types.Part.from_bytes(data=image_data, mime_type=media_type),
+            types.Part.from_text(text=prompt),
+        ]
+        config = types.GenerateContentConfig(
+            response_mime_type="application/json",
+            max_output_tokens=1524,
+            thinking_config=types.ThinkingConfig(thinking_budget=1024),
+        )
+
+        last_error = None
+        for attempt in range(max_retries + 1):
+            try:
+                response = self._client.models.generate_content(
+                    model=self._model,
+                    contents=contents,
+                    config=config,
+                )
+                text = response.text
+                data = json.loads(text)
+                return {
+                    "summary": data.get("summary", ""),
+                    "highlights": data.get("highlights", []),
+                }
+
+            except Exception as e:
+                last_error = e
+                error_str = str(e)
+
+                if "429" not in error_str and "RESOURCE_EXHAUSTED" not in error_str:
+                    raise
+
+                if "limit: 0" in error_str:
+                    raise QuotaExhaustedError(
+                        "Gemini free tier quota exhausted. Either wait until quota resets "
+                        "or enable billing at https://ai.google.dev"
+                    ) from e
+
+                if attempt < max_retries:
+                    wait = min(2 ** attempt * 2, 60)
+                    time.sleep(wait)
+
+        raise last_error
+
     def estimate_cost(self, num_images: int, avg_tokens_per_image: int = 1600) -> float:
         """Gemini Flash free tier -- no cost."""
         return 0.0

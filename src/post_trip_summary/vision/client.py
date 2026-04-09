@@ -27,6 +27,17 @@ class VisionProvider(ABC):
         """Text-only call to synthesize multiple descriptions into one."""
         raise NotImplementedError("Provider does not support synthesis")
 
+    def analyze_montage(
+        self,
+        image_data: bytes,
+        media_type: str = "image/jpeg",
+        purpose: str = "montage",
+        context: str = "",
+        image_count: int = 0,
+    ) -> dict:
+        """Analyze a montage image. Returns dict with 'summary' and 'highlights' keys."""
+        raise NotImplementedError("Provider does not support montage analysis")
+
 
 # Approximate Claude pricing (input tokens for images)
 _INPUT_COST_PER_MTOK = 3.0   # $/M input tokens (Claude Sonnet)

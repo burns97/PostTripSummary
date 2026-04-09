@@ -69,3 +69,28 @@ def test_create_provider_unknown():
         assert False, "Should have raised ValueError"
     except ValueError as e:
         assert "Unknown vision provider" in str(e)
+
+
+def test_gemini_analyze_montage_mock(monkeypatch):
+    """Test Gemini provider's analyze_montage with mocked API."""
+    from unittest.mock import MagicMock
+    from post_trip_summary.vision.gemini import GeminiProvider
+
+    mock_client = MagicMock()
+    mock_response = MagicMock()
+    mock_response.text = '{"summary": "Visited a movie set.", "highlights": [1, 3, 5]}'
+    mock_client.models.generate_content.return_value = mock_response
+
+    provider = GeminiProvider.__new__(GeminiProvider)
+    provider._client = mock_client
+    provider._model = "gemini-2.5-flash"
+
+    result = provider.analyze_montage(
+        image_data=b"fake-jpeg",
+        media_type="image/jpeg",
+        purpose="montage",
+        context="Location: Hobbiton",
+        image_count=10,
+    )
+    assert result["summary"] == "Visited a movie set."
+    assert result["highlights"] == [1, 3, 5]
