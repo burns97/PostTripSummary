@@ -387,12 +387,26 @@ def create_app(session: SessionConfig) -> FastAPI:
             "reviewed": "reviewed",
             "enriched": "enriched",
             "highlights_done": "highlights_done",
+            "generated": "highlights_done",
         }
         target = save_targets.get(stage, stage)
         try:
             _save(app.state.trip, app.state.session.stage_file(target))
         except ValueError:
             pass  # Stages like "new" or "setup" have no file
+
+    def _on_highlights_changed():
+        """Save trip and reset stage if highlights changed after synthesis."""
+        from post_trip_summary.serialization import save_trip as _save
+        stage = app.state.session.current_stage
+        if stage in ("highlights_done", "generated"):
+            # Save to enriched so re-synthesis picks up changes
+            _save(app.state.trip, app.state.session.stage_file("enriched"))
+            # Reset stage so user must re-run synthesis
+            app.state.session.current_stage = "enriched"
+            app.state.session.save()
+        else:
+            _save_trip()
 
     def _rebuild_index():
         """Rebuild event index and clear thumbnail cache after structural changes."""
@@ -533,7 +547,7 @@ def create_app(session: SessionConfig) -> FastAPI:
             raise HTTPException(400, "Invalid photo index")
         photo = event.photos[idx]
         photo.is_highlight = not photo.is_highlight
-        _save_trip()
+        _on_highlights_changed()
         highlighted = sum(1 for p in event.photos if p.is_kept and p.is_highlight)
         kept = sum(1 for p in event.photos if p.is_kept)
         return JSONResponse({"is_highlight": photo.is_highlight,
@@ -561,7 +575,10 @@ def create_app(session: SessionConfig) -> FastAPI:
         elif action == "highlight_none":
             for photo in event.photos:
                 photo.is_highlight = False
-        _save_trip()
+        if action in ("highlight_all", "highlight_none"):
+            _on_highlights_changed()
+        else:
+            _save_trip()
         return JSONResponse({"event_id": event_id, "action": action, "photo_count": len(event.photos)})
 
     # --- Description editing ---
