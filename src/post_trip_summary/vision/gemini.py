@@ -186,17 +186,22 @@ class GeminiProvider(VisionProvider):
 
         raise last_error
 
-    def estimate_cost(self, num_images: int, avg_tokens_per_image: int = 1600) -> float:
-        """Estimate API cost. Returns 0.0 for free tier, actual cost for paid tier.
+    # Per-model pricing (per 1M tokens): {model_prefix: (input_cost, output_cost)}
+    _PRICING = {
+        "gemini-2.5-flash": (0.30, 2.50),
+        "gemini-2.5-pro": (1.25, 10.00),
+        "gemini-3.1-flash-lite": (0.25, 1.50),
+        "gemini-3.1-pro": (2.00, 12.00),
+    }
 
-        Gemini 2.5 Flash paid pricing (per 1M tokens):
-          Input (text/image): $0.30
-          Output: $2.50
-        """
+    def estimate_cost(self, num_images: int, avg_tokens_per_image: int = 1600) -> float:
+        """Estimate API cost. Returns 0.0 for free tier, actual cost for paid tier."""
         if not self._billing:
             return 0.0
+        # Find pricing for current model, fall back to 2.5 Flash rates
+        input_rate, output_rate = self._PRICING.get(self._model, (0.30, 2.50))
         input_tokens = num_images * avg_tokens_per_image
-        output_tokens = num_images * 200  # ~200 output tokens per response
-        input_cost = (input_tokens / 1_000_000) * 0.30
-        output_cost = (output_tokens / 1_000_000) * 2.50
+        output_tokens = num_images * 200
+        input_cost = (input_tokens / 1_000_000) * input_rate
+        output_cost = (output_tokens / 1_000_000) * output_rate
         return round(input_cost + output_cost, 4)

@@ -58,5 +58,6 @@ def test_gemini_estimate_cost_paid():
         from post_trip_summary.vision.gemini import GeminiProvider
         provider = GeminiProvider.__new__(GeminiProvider)
         provider._billing = True
+        provider._model = "gemini-2.5-flash"
         cost = provider.estimate_cost(100)
         assert cost > 0.0
