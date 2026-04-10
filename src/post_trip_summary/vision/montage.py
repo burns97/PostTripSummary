@@ -7,6 +7,13 @@ from typing import TYPE_CHECKING
 
 from PIL import Image, ImageDraw, ImageFont
 
+# Register HEIC/HEIF opener if available (iPhone photos)
+try:
+    import pillow_heif
+    pillow_heif.register_heif_opener()
+except ImportError:
+    pass
+
 if TYPE_CHECKING:
     from post_trip_summary.models import Photo
 
