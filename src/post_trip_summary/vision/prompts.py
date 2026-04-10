@@ -76,9 +76,12 @@ def build_context(
     city: str = "",
     country: str = "",
     poi_name: str = "",
+    event_name: str = "",
 ) -> str:
     """Build a context hint string from available metadata."""
     parts = []
+    if event_name and event_name not in ("Unknown", poi_name, city):
+        parts.append(f"Event: {event_name}")
     if timestamp:
         parts.append(f"Taken: {timestamp}")
     location_parts = [p for p in [poi_name, city, country] if p]

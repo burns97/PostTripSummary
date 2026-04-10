@@ -126,6 +126,7 @@ def enrich_trip(trip: Trip, auto_approve: bool = False) -> Trip:
             city=loc.city if loc else "",
             country=loc.country if loc else "",
             poi_name=loc.name if loc and loc.name not in ("Unknown", loc.city, "") else "",
+            event_name=event.name,
         )
 
         best_description = ""
@@ -257,6 +258,7 @@ def _enrich_thorough_pass(all_events, provider, progress_fn, event_count):
             city=loc.city if loc else "",
             country=loc.country if loc else "",
             poi_name=loc.name if loc and loc.name not in ("Unknown", loc.city, "") else "",
+            event_name=event.name,
         )
 
         for photo in highlights:
@@ -284,6 +286,7 @@ def _enrich_thorough_pass(all_events, provider, progress_fn, event_count):
             city=loc.city if loc else "",
             country=loc.country if loc else "",
             poi_name=loc.name if loc and loc.name not in ("Unknown", loc.city, "") else "",
+            event_name=event.name,
         )
 
         desc_lines = [f"{i + 1}. {p.ai_description}" for i, p in enumerate(described)]
@@ -367,6 +370,7 @@ def enrich_trip_headless(
             city=loc.city if loc else "",
             country=loc.country if loc else "",
             poi_name=loc.name if loc and loc.name not in ("Unknown", loc.city, "") else "",
+            event_name=event.name,
         )
 
         _progress("analyzing", event_idx, event_count,
@@ -467,6 +471,7 @@ def synthesize_event_descriptions(trip: Trip, progress_callback=None) -> Trip:
             city=loc.city if loc else "",
             country=loc.country if loc else "",
             poi_name=loc.name if loc and loc.name not in ("Unknown", loc.city, "") else "",
+            event_name=event.name,
         )
 
         prompt = get_prompt(
