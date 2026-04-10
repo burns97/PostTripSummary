@@ -47,5 +47,16 @@ def test_gemini_estimate_cost_free():
     with patch.dict("sys.modules", {"google": MagicMock(), "google.genai": MagicMock()}):
         from post_trip_summary.vision.gemini import GeminiProvider
         provider = GeminiProvider.__new__(GeminiProvider)
+        provider._billing = False
         assert provider.estimate_cost(100) == 0.0
         assert provider.estimate_cost(0) == 0.0
+
+
+def test_gemini_estimate_cost_paid():
+    """Gemini Flash paid tier returns non-zero cost."""
+    with patch.dict("sys.modules", {"google": MagicMock(), "google.genai": MagicMock()}):
+        from post_trip_summary.vision.gemini import GeminiProvider
+        provider = GeminiProvider.__new__(GeminiProvider)
+        provider._billing = True
+        cost = provider.estimate_cost(100)
+        assert cost > 0.0

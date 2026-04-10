@@ -20,6 +20,7 @@ DEFAULT_SETTINGS = {
         "provider": "gemini",
         "gemini_api_key": "",
         "gemini_model": "gemini-2.5-flash",
+        "gemini_billing": False,
         "claude_api_key": "",
         "claude_model": "claude-sonnet-4-20250514",
     },
@@ -38,6 +39,10 @@ provider = "gemini"
 # Gemini settings (or set GOOGLE_API_KEY env var)
 gemini_api_key = ""
 gemini_model = "gemini-2.5-flash"
+
+# Set to true if using a Google Cloud API key with billing enabled
+# When false, assumes free tier (AI Studio key) — no cost estimates shown
+gemini_billing = false
 
 # Claude settings (or set ANTHROPIC_API_KEY env var)
 claude_api_key = ""
@@ -115,12 +120,15 @@ def get_vision_settings(settings_file: Path | None = None) -> dict:
     vision = settings["vision"]
     provider = vision["provider"]
 
+    billing = False
     if provider == "gemini":
         api_key = vision.get("gemini_api_key", "") or os.environ.get("GOOGLE_API_KEY", "")
         model = vision.get("gemini_model", "gemini-2.0-flash")
+        billing = vision.get("gemini_billing", False)
     elif provider == "claude":
         api_key = vision.get("claude_api_key", "") or os.environ.get("ANTHROPIC_API_KEY", "")
         model = vision.get("claude_model", "claude-sonnet-4-20250514")
+        billing = True  # Claude always has costs
     else:
         raise ValueError(f"Unknown vision provider: {provider}. Options: gemini, claude")
 
@@ -128,6 +136,7 @@ def get_vision_settings(settings_file: Path | None = None) -> dict:
         "provider": provider,
         "api_key": api_key or None,
         "model": model,
+        "billing": billing,
     }
 
 

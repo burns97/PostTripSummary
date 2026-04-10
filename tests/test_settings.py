@@ -74,7 +74,7 @@ def test_get_vision_settings(tmp_path):
     path = tmp_path / "settings.toml"
     save_settings(DEFAULT_SETTINGS, path)
     vs = get_vision_settings(path)
-    assert set(vs.keys()) == {"provider", "api_key", "model"}
+    assert set(vs.keys()) == {"provider", "api_key", "model", "billing"}
     assert vs["provider"] == "gemini"
     assert vs["model"] == "gemini-2.5-flash"
 

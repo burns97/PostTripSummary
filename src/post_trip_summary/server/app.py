@@ -241,7 +241,8 @@ def create_app(session: SessionConfig) -> FastAPI:
         if vs.get("api_key"):
             try:
                 provider = _create_provider(
-                    vs["provider"], api_key=vs.get("api_key"), model=vs.get("model")
+                    vs["provider"], api_key=vs.get("api_key"), model=vs.get("model"),
+                    billing=vs.get("billing", False),
                 )
                 # Use quick mode total for cost estimation
                 cost = provider.estimate_cost(quick_total)

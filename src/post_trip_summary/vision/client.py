@@ -119,12 +119,12 @@ class ClaudeProvider(VisionProvider):
 VisionClient = ClaudeProvider
 
 
-def create_provider(name: str = "gemini", api_key: str | None = None, model: str | None = None) -> VisionProvider:
+def create_provider(name: str = "gemini", api_key: str | None = None, model: str | None = None, billing: bool = False) -> VisionProvider:
     """Factory -- returns the appropriate provider instance."""
     if name == "claude":
         return ClaudeProvider(api_key=api_key, model=model or "claude-sonnet-4-20250514")
     elif name == "gemini":
         from post_trip_summary.vision.gemini import GeminiProvider
-        return GeminiProvider(api_key=api_key, model=model or "gemini-2.5-flash")
+        return GeminiProvider(api_key=api_key, model=model or "gemini-2.5-flash", billing=billing)
     else:
         raise ValueError(f"Unknown vision provider: {name}. Options: claude, gemini")

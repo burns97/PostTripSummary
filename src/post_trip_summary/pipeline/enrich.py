@@ -60,7 +60,7 @@ def enrich_trip(trip: Trip, auto_approve: bool = False) -> Trip:
             _select_highlights(event.photos)
         return trip
 
-    provider = create_provider(vs["provider"], api_key=vs.get("api_key"), model=vs.get("model"))
+    provider = create_provider(vs["provider"], api_key=vs.get("api_key"), model=vs.get("model"), billing=vs.get("billing", False))
 
     # Collect all events with photos
     all_events = [event for day in trip.days for event in day.events if event.photos]
@@ -347,7 +347,7 @@ def enrich_trip_headless(
         _progress("done", 0, 0, "No API key; highlights selected only")
         return trip
 
-    provider = create_provider(vs["provider"], api_key=vs.get("api_key"), model=vs.get("model"))
+    provider = create_provider(vs["provider"], api_key=vs.get("api_key"), model=vs.get("model"), billing=vs.get("billing", False))
 
     from post_trip_summary.vision.gemini import QuotaExhaustedError
     from post_trip_summary.vision.montage import build_montage
@@ -437,7 +437,7 @@ def synthesize_event_descriptions(trip: Trip, progress_callback=None) -> Trip:
     if not vs.get("api_key"):
         return trip
 
-    provider = create_provider(vs["provider"], api_key=vs.get("api_key"), model=vs.get("model"))
+    provider = create_provider(vs["provider"], api_key=vs.get("api_key"), model=vs.get("model"), billing=vs.get("billing", False))
     from post_trip_summary.vision.prompts import build_context, get_prompt
 
     all_events = [event for day in trip.days for event in day.events if event.photos]

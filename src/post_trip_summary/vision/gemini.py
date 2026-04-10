@@ -11,10 +11,11 @@ class QuotaExhaustedError(Exception):
 
 
 class GeminiProvider(VisionProvider):
-    def __init__(self, api_key: str | None = None, model: str = "gemini-2.5-flash"):
+    def __init__(self, api_key: str | None = None, model: str = "gemini-2.5-flash", billing: bool = False):
         from google import genai
         self._client = genai.Client(api_key=api_key)
         self._model = model
+        self._billing = billing
 
     def analyze(
         self,
@@ -186,5 +187,16 @@ class GeminiProvider(VisionProvider):
         raise last_error
 
     def estimate_cost(self, num_images: int, avg_tokens_per_image: int = 1600) -> float:
-        """Gemini Flash free tier -- no cost."""
-        return 0.0
+        """Estimate API cost. Returns 0.0 for free tier, actual cost for paid tier.
+
+        Gemini 2.5 Flash paid pricing (per 1M tokens):
+          Input (text/image): $0.30
+          Output: $2.50
+        """
+        if not self._billing:
+            return 0.0
+        input_tokens = num_images * avg_tokens_per_image
+        output_tokens = num_images * 200  # ~200 output tokens per response
+        input_cost = (input_tokens / 1_000_000) * 0.30
+        output_cost = (output_tokens / 1_000_000) * 2.50
+        return round(input_cost + output_cost, 4)
