@@ -11,11 +11,22 @@ class QuotaExhaustedError(Exception):
 
 
 class GeminiProvider(VisionProvider):
+    # Minimum seconds between API calls to avoid 503 overload errors
+    _MIN_INTERVAL = 1.0
+
     def __init__(self, api_key: str | None = None, model: str = "gemini-2.5-flash", billing: bool = False):
         from google import genai
         self._client = genai.Client(api_key=api_key)
         self._model = model
         self._billing = billing
+        self._last_request = 0.0
+
+    def _throttle(self):
+        """Wait if needed to respect minimum interval between requests."""
+        elapsed = time.monotonic() - self._last_request
+        if elapsed < self._MIN_INTERVAL:
+            time.sleep(self._MIN_INTERVAL - elapsed)
+        self._last_request = time.monotonic()
 
     def analyze(
         self,
@@ -44,6 +55,7 @@ class GeminiProvider(VisionProvider):
 
         last_error = None
         for attempt in range(max_retries + 1):
+            self._throttle()
             try:
                 response = self._client.models.generate_content(
                     model=self._model,
@@ -98,6 +110,7 @@ class GeminiProvider(VisionProvider):
 
         last_error = None
         for attempt in range(max_retries + 1):
+            self._throttle()
             try:
                 response = self._client.models.generate_content(
                     model=self._model,
@@ -158,6 +171,7 @@ class GeminiProvider(VisionProvider):
 
         last_error = None
         for attempt in range(max_retries + 1):
+            self._throttle()
             try:
                 response = self._client.models.generate_content(
                     model=self._model,

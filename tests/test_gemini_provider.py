@@ -28,6 +28,7 @@ def test_gemini_analyze_mock():
             provider = GeminiProvider.__new__(GeminiProvider)
             provider._client = mock_client_instance
             provider._model = "gemini-2.0-flash"
+            provider._last_request = 0.0
 
         jpeg_bytes = b'\xff\xd8\xff\xe0' + b'\x00' * 100 + b'\xff\xd9'
 

@@ -84,6 +84,7 @@ def test_gemini_analyze_montage_mock(monkeypatch):
     provider = GeminiProvider.__new__(GeminiProvider)
     provider._client = mock_client
     provider._model = "gemini-2.5-flash"
+    provider._last_request = 0.0
 
     result = provider.analyze_montage(
         image_data=b"fake-jpeg",
