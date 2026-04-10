@@ -66,7 +66,9 @@ class GeminiProvider(VisionProvider):
                 last_error = e
                 error_str = str(e)
 
-                if "429" not in error_str and "RESOURCE_EXHAUSTED" not in error_str:
+                err_lower = error_str.lower()
+                retryable = "429" in err_lower or "resource_exhausted" in err_lower or "503" in err_lower or "overloaded" in err_lower
+                if not retryable:
                     raise
 
                 # Check if quota is genuinely exhausted (limit: 0) vs transient rate limit
@@ -113,7 +115,9 @@ class GeminiProvider(VisionProvider):
                 last_error = e
                 error_str = str(e)
 
-                if "429" not in error_str and "RESOURCE_EXHAUSTED" not in error_str:
+                err_lower = error_str.lower()
+                retryable = "429" in err_lower or "resource_exhausted" in err_lower or "503" in err_lower or "overloaded" in err_lower
+                if not retryable:
                     raise
 
                 if "limit: 0" in error_str:
@@ -171,7 +175,9 @@ class GeminiProvider(VisionProvider):
                 last_error = e
                 error_str = str(e)
 
-                if "429" not in error_str and "RESOURCE_EXHAUSTED" not in error_str:
+                err_lower = error_str.lower()
+                retryable = "429" in err_lower or "resource_exhausted" in err_lower or "503" in err_lower or "overloaded" in err_lower
+                if not retryable:
                     raise
 
                 if "limit: 0" in error_str:
