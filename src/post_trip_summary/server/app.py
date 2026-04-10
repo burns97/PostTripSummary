@@ -237,15 +237,17 @@ def create_app(session: SessionConfig) -> FastAPI:
         # Thorough mode: quick + (montage_events * 5 for highlights per-photo calls) + montage_events for synthesis
         thorough_total = quick_total + (len(montage_events) * 5) + len(montage_events)
 
-        cost = 0.0
-        if vs.get("api_key"):
+        quick_cost = 0.0
+        thorough_cost = 0.0
+        billing = vs.get("billing", False)
+        if vs.get("api_key") and billing:
             try:
                 provider = _create_provider(
                     vs["provider"], api_key=vs.get("api_key"), model=vs.get("model"),
-                    billing=vs.get("billing", False),
+                    billing=billing,
                 )
-                # Use quick mode total for cost estimation
-                cost = provider.estimate_cost(quick_total)
+                quick_cost = provider.estimate_cost(quick_total)
+                thorough_cost = provider.estimate_cost(thorough_total)
             except Exception:
                 pass
 
@@ -254,7 +256,9 @@ def create_app(session: SessionConfig) -> FastAPI:
             "model": vs.get("model", ""),
             "total_images": quick_total,
             "reduced_images": thorough_total,
-            "estimated_cost": cost,
+            "estimated_cost": quick_cost,
+            "thorough_cost": thorough_cost,
+            "billing": billing,
             "has_api_key": bool(vs.get("api_key")),
             "event_count": len(all_events),
         })

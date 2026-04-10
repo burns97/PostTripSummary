@@ -76,6 +76,9 @@
         <button class="btn-reduce" id="btn-reduce" onclick="startEnrich('thorough')">Thorough</button>
         <button class="btn-skip" id="btn-skip" onclick="startEnrich('skip')">Skip</button>
       </div>
+      <div class="btn-costs" id="btn-costs" style="display: none; text-align: center; margin-top: 0.3rem;">
+        <span id="btn-cost-labels" style="color: #888; font-size: 0.8rem;"></span>
+      </div>
     </div>
   </div>
 
@@ -115,10 +118,12 @@ fetch("/api/enrich/estimate")
     document.getElementById("est-total").textContent = data.total_images;
     document.getElementById("est-reduced").textContent = data.reduced_images;
 
-    if (data.estimated_cost === 0) {
+    if (!data.billing) {
       document.getElementById("est-cost").innerHTML = '<span class="cost-free">Estimated cost: Free (free tier)</span>';
     } else {
-      document.getElementById("est-cost").innerHTML = 'Estimated cost: <span class="cost-warn">$' + data.estimated_cost.toFixed(2) + '</span>';
+      document.getElementById("est-cost").innerHTML = '';
+      document.getElementById("btn-approve").textContent = 'Quick ($' + data.estimated_cost.toFixed(2) + ')';
+      document.getElementById("btn-reduce").textContent = 'Thorough ($' + data.thorough_cost.toFixed(2) + ')';
     }
 
     if (!data.has_api_key) {
