@@ -1,7 +1,7 @@
 # src/post_trip_summary/vision/prompts.py
 """Prompt templates for vision API calls."""
 
-PURPOSES = ("landmark", "sign", "scene", "synthesize", "montage", "narrative")
+PURPOSES = ("landmark", "sign", "scene", "synthesize", "montage", "narrative", "batch_describe")
 
 _PROMPTS = {
     "landmark": """Analyze this photo and identify any landmarks or notable locations.
@@ -53,6 +53,19 @@ Respond with JSON only:
 {{
   "summary": "factual 2-3 sentence summary of the event",
   "highlights": [3, 7, 12]
+}}""",
+
+    "batch_describe": """Here are {image_count} photos from {event_count} events during a vacation trip, shown as a numbered grid.
+
+{event_groups}
+For each photo, write a brief description suitable for a trip journal. Note any landmarks or readable text.
+
+Respond with JSON only:
+{{
+  "photos": {{
+    "1": {{"description": "2-3 sentence description", "landmark": "name or null", "text_found": "text or null"}},
+    "2": {{"description": "2-3 sentence description", "landmark": "name or null", "text_found": "text or null"}}
+  }}
 }}""",
 
     "narrative": """Here is a factual summary of an event, plus detailed descriptions of key photos:

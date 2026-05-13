@@ -218,6 +218,121 @@ def enrich_trip(trip: Trip, auto_approve: bool = False) -> Trip:
     return trip
 
 
+def _batch_small_events(all_events, max_photos=20):
+    """Partition events into small-event batches and large events.
+
+    Returns (batches, large_events) where:
+    - batches: list of lists, each list contains (event, kept_photos) tuples
+      with total photos <= max_photos
+    - large_events: list of events with >3 kept photos (use regular montage)
+    """
+    small_items = []  # (event, kept_photos)
+    large_events = []
+
+    for event in all_events:
+        kept = [p for p in event.photos if p.is_kept]
+        if not kept:
+            continue
+        if len(kept) <= 3:
+            small_items.append((event, kept))
+        else:
+            large_events.append(event)
+
+    # Group small items into batches respecting max_photos
+    batches = []
+    current_batch = []
+    current_count = 0
+    for item in small_items:
+        photo_count = len(item[1])
+        if current_count + photo_count > max_photos and current_batch:
+            batches.append(current_batch)
+            current_batch = []
+            current_count = 0
+        current_batch.append(item)
+        current_count += photo_count
+    if current_batch:
+        batches.append(current_batch)
+
+    return batches, large_events
+
+
+def _enrich_batch_montage(batch, provider, build_context_fn):
+    """Enrich a batch of small events via a single montage API call.
+
+    Args:
+        batch: list of (event, kept_photos) tuples
+        provider: vision provider instance
+        build_context_fn: callable to build context string for an event
+
+    Returns True if successful, False if failed (caller should fall back).
+    """
+    from post_trip_summary.vision.montage import build_montage
+
+    # Combine all photos into a single list, tracking which event each belongs to
+    all_photos = []
+    event_ranges = []  # (event, start_idx, end_idx) — 1-based grid numbers
+    for event, kept in batch:
+        start = len(all_photos) + 1
+        all_photos.extend(kept)
+        end = len(all_photos)
+        event_ranges.append((event, start, end))
+
+    if not all_photos:
+        return True
+
+    # Build the montage
+    montage_data, photo_map = build_montage(all_photos)
+
+    # Build event_groups string for the prompt
+    group_lines = []
+    for event, start, end in event_ranges:
+        ctx = build_context_fn(event)
+        photo_range = str(start) if start == end else f"{start}-{end}"
+        group_lines.append(f"Event \"{event.name}\" (photos {photo_range}):\n{ctx}")
+    event_groups = "\n".join(group_lines)
+
+    try:
+        result = provider.analyze_montage(
+            montage_data,
+            media_type="image/jpeg",
+            purpose="batch_describe",
+            context="",
+            image_count=len(photo_map),
+            event_count=len(batch),
+            event_groups=event_groups,
+        )
+    except Exception:
+        return False
+
+    # Parse and distribute descriptions back to photos
+    photos_data = result.get("photos", {})
+    for grid_num, photo in photo_map.items():
+        # Handle both string and int keys from JSON
+        photo_info = photos_data.get(str(grid_num)) or photos_data.get(grid_num, {})
+        if isinstance(photo_info, dict):
+            photo.ai_description = photo_info.get("description", "")
+        elif isinstance(photo_info, str):
+            photo.ai_description = photo_info
+
+    # Set event summary/description and mark all as highlights
+    for event, start, end in event_ranges:
+        descriptions = []
+        for num in range(start, end + 1):
+            if num in photo_map and photo_map[num].ai_description:
+                descriptions.append(photo_map[num].ai_description)
+        if descriptions:
+            event.summary = descriptions[0]
+            event.description = descriptions[0]
+        for _, kept in batch:
+            pass  # photos already updated via photo_map
+        # Mark all kept photos as highlights (same as _enrich_few_photos)
+        kept_photos = [p for p in event.photos if p.is_kept]
+        for p in kept_photos:
+            p.is_highlight = True
+
+    return True
+
+
 def _enrich_few_photos(event, photos, provider, context):
     """Enrich events with <=3 photos by sending individually."""
     descriptions = []
@@ -359,13 +474,9 @@ def enrich_trip_headless(
     quota_exhausted = False
     event_count = len(all_events)
 
-    for event_idx, event in enumerate(all_events, 1):
-        kept = [p for p in event.photos if p.is_kept]
-        if not kept:
-            continue
-
+    def _build_event_context(event):
         loc = event.location
-        context = build_context(
+        return build_context(
             timestamp=event.time_range[0].strftime("%Y-%m-%d %H:%M") if event.time_range else "",
             city=loc.city if loc else "",
             country=loc.country if loc else "",
@@ -373,53 +484,90 @@ def enrich_trip_headless(
             event_name=event.name,
         )
 
-        _progress("analyzing", event_idx, event_count,
-                  f"[{event_idx}/{event_count}] {event.name}")
+    # Partition into small-event batches and large events
+    batches, large_events = _batch_small_events(all_events)
+    processed = 0
+
+    # Phase 1: Process small-event batches
+    for batch_idx, batch in enumerate(batches, 1):
+        batch_event_names = ", ".join(e.name for e, _ in batch[:3])
+        if len(batch) > 3:
+            batch_event_names += f" (+{len(batch) - 3} more)"
+        batch_photo_count = sum(len(kept) for _, kept in batch)
+        processed += len(batch)
+        _progress("analyzing", processed, event_count,
+                  f"Batch {batch_idx}/{len(batches)}: {batch_event_names} ({batch_photo_count} photos)")
+
+        if quota_exhausted:
+            for event, _ in batch:
+                _select_highlights(event.photos)
+            continue
+
+        try:
+            success = _enrich_batch_montage(batch, provider, _build_event_context)
+        except QuotaExhaustedError:
+            quota_exhausted = True
+            success = False
+
+        if not success:
+            # Fall back to individual calls per event
+            for event, kept in batch:
+                if quota_exhausted:
+                    _select_highlights(event.photos)
+                    continue
+                context = _build_event_context(event)
+                try:
+                    _enrich_few_photos(event, kept, provider, context)
+                except QuotaExhaustedError:
+                    quota_exhausted = True
+                    _select_highlights(event.photos)
+
+    # Phase 2: Process large events with per-event montages (unchanged)
+    for event in large_events:
+        kept = [p for p in event.photos if p.is_kept]
+        if not kept:
+            processed += 1
+            continue
+
+        processed += 1
+        context = _build_event_context(event)
+        _progress("analyzing", processed, event_count,
+                  f"[{processed}/{event_count}] {event.name}")
 
         if quota_exhausted:
             _select_highlights(event.photos)
             continue
 
-        if len(kept) <= 3:
-            # Few photos: send individually
-            try:
-                _enrich_few_photos(event, kept, provider, context)
-            except QuotaExhaustedError:
-                quota_exhausted = True
+        try:
+            montage_data, photo_map = build_montage(kept)
+            result = provider.analyze_montage(
+                montage_data,
+                media_type="image/jpeg",
+                purpose="montage",
+                context=context,
+                image_count=len(photo_map),
+            )
+            summary = result.get("summary", "")
+            highlights = result.get("highlights", [])
+
+            event.summary = summary
+            event.description = summary
+
+            # Mark highlights from montage picks
+            for num in highlights:
+                if num in photo_map:
+                    photo_map[num].is_highlight = True
+
+            # If no highlights were picked, fall back to _select_highlights
+            if not any(p.is_highlight for p in event.photos):
                 _select_highlights(event.photos)
-                continue
-        else:
-            # Many photos: build montage
-            try:
-                montage_data, photo_map = build_montage(kept)
-                result = provider.analyze_montage(
-                    montage_data,
-                    media_type="image/jpeg",
-                    purpose="montage",
-                    context=context,
-                    image_count=len(photo_map),
-                )
-                summary = result.get("summary", "")
-                highlights = result.get("highlights", [])
 
-                event.summary = summary
-                event.description = summary
-
-                # Mark highlights from montage picks
-                for num in highlights:
-                    if num in photo_map:
-                        photo_map[num].is_highlight = True
-
-                # If no highlights were picked, fall back to _select_highlights
-                if not any(p.is_highlight for p in event.photos):
-                    _select_highlights(event.photos)
-
-            except QuotaExhaustedError:
-                quota_exhausted = True
-                _select_highlights(event.photos)
-                continue
-            except Exception:
-                _select_highlights(event.photos)
+        except QuotaExhaustedError:
+            quota_exhausted = True
+            _select_highlights(event.photos)
+            continue
+        except Exception:
+            _select_highlights(event.photos)
 
     # Thorough mode: additional per-photo pass (Task 6)
     if mode == "thorough" and not quota_exhausted:

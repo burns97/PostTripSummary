@@ -1,9 +1,12 @@
 # src/post_trip_summary/vision/gemini.py
 """Google Gemini vision provider."""
 import json
+import logging
 import time
 
 from post_trip_summary.vision.client import VisionProvider, VisionResult
+
+logger = logging.getLogger(__name__)
 
 
 class QuotaExhaustedError(Exception):
@@ -11,8 +14,9 @@ class QuotaExhaustedError(Exception):
 
 
 class GeminiProvider(VisionProvider):
-    # Minimum seconds between API calls to avoid 503 overload errors
-    _MIN_INTERVAL = 1.0
+    # Minimum seconds between API calls — free tier ~10 RPM, billing ~1000 RPM
+    _MIN_INTERVAL_FREE = 7.0
+    _MIN_INTERVAL_BILLING = 1.0
 
     def __init__(self, api_key: str | None = None, model: str = "gemini-2.5-flash", billing: bool = False):
         from google import genai
@@ -20,13 +24,32 @@ class GeminiProvider(VisionProvider):
         self._model = model
         self._billing = billing
         self._last_request = 0.0
+        self._max_retries = 3 if billing else 8
+        # Adaptive throttle: starts at min interval, grows on 429s
+        self._interval = self._MIN_INTERVAL_BILLING if billing else self._MIN_INTERVAL_FREE
 
     def _throttle(self):
         """Wait if needed to respect minimum interval between requests."""
         elapsed = time.monotonic() - self._last_request
-        if elapsed < self._MIN_INTERVAL:
-            time.sleep(self._MIN_INTERVAL - elapsed)
+        if elapsed < self._interval:
+            time.sleep(self._interval - elapsed)
         self._last_request = time.monotonic()
+
+    def _retry_wait(self, attempt: int) -> float:
+        """Backoff time for a retry attempt, never shorter than current throttle interval."""
+        if self._billing:
+            base = min(2 ** attempt * 2, 60)
+        else:
+            base = min(2 ** attempt * 5, 90)
+        return max(base, self._interval)
+
+    def _back_off(self):
+        """Widen the throttle interval after a rate-limit hit."""
+        max_interval = 60.0
+        new_interval = min(self._interval * 1.5, max_interval)
+        if new_interval != self._interval:
+            self._interval = new_interval
+            logger.info("Rate limited — throttle interval increased to %.0fs", self._interval)
 
     def analyze(
         self,
@@ -34,7 +57,7 @@ class GeminiProvider(VisionProvider):
         media_type: str = "image/jpeg",
         purpose: str = "landmark",
         context: str = "",
-        max_retries: int = 3,
+        max_retries: int | None = None,
     ) -> VisionResult:
         """Send an image to Gemini and parse the result. Retries on transient 429s."""
         from google.genai import types
@@ -53,8 +76,9 @@ class GeminiProvider(VisionProvider):
             thinking_config=types.ThinkingConfig(thinking_budget=1024),
         )
 
+        retries = max_retries if max_retries is not None else self._max_retries
         last_error = None
-        for attempt in range(max_retries + 1):
+        for attempt in range(retries + 1):
             self._throttle()
             try:
                 response = self._client.models.generate_content(
@@ -90,14 +114,15 @@ class GeminiProvider(VisionProvider):
                         "or enable billing at https://ai.google.dev"
                     ) from e
 
-                # Transient rate limit — wait and retry
-                if attempt < max_retries:
-                    wait = min(2 ** attempt * 2, 60)
+                # Transient rate limit — widen throttle and retry
+                self._back_off()
+                if attempt < retries:
+                    wait = self._retry_wait(attempt)
                     time.sleep(wait)
 
         raise last_error
 
-    def synthesize(self, prompt: str, max_retries: int = 3) -> str:
+    def synthesize(self, prompt: str, max_retries: int | None = None) -> str:
         """Text-only call to synthesize descriptions. Retries on transient 429s."""
         from google.genai import types
 
@@ -108,8 +133,9 @@ class GeminiProvider(VisionProvider):
             thinking_config=types.ThinkingConfig(thinking_budget=512),
         )
 
+        retries = max_retries if max_retries is not None else self._max_retries
         last_error = None
-        for attempt in range(max_retries + 1):
+        for attempt in range(retries + 1):
             self._throttle()
             try:
                 response = self._client.models.generate_content(
@@ -139,8 +165,9 @@ class GeminiProvider(VisionProvider):
                         "or enable billing at https://ai.google.dev"
                     ) from e
 
-                if attempt < max_retries:
-                    wait = min(2 ** attempt * 2, 60)
+                self._back_off()
+                if attempt < retries:
+                    wait = self._retry_wait(attempt)
                     time.sleep(wait)
 
         raise last_error
@@ -152,25 +179,33 @@ class GeminiProvider(VisionProvider):
         purpose: str = "montage",
         context: str = "",
         image_count: int = 0,
-        max_retries: int = 3,
+        max_retries: int | None = None,
+        **prompt_kwargs,
     ) -> dict:
-        """Analyze a montage image. Returns dict with 'summary' and 'highlights' keys."""
+        """Analyze a montage image.
+
+        For purpose='montage': returns {'summary': str, 'highlights': list}.
+        For other purposes (e.g. 'batch_describe'): returns raw parsed JSON dict.
+        """
         from google.genai import types
         from post_trip_summary.vision.prompts import get_prompt
 
-        prompt = get_prompt(purpose, context=context, image_count=image_count)
+        prompt = get_prompt(purpose, context=context, image_count=image_count, **prompt_kwargs)
         contents = [
             types.Part.from_bytes(data=image_data, mime_type=media_type),
             types.Part.from_text(text=prompt),
         ]
+        # Batch calls with many photos need more response tokens
+        output_tokens = 3072 if purpose == "batch_describe" else 1524
         config = types.GenerateContentConfig(
             response_mime_type="application/json",
-            max_output_tokens=1524,
+            max_output_tokens=output_tokens,
             thinking_config=types.ThinkingConfig(thinking_budget=1024),
         )
 
+        retries = max_retries if max_retries is not None else self._max_retries
         last_error = None
-        for attempt in range(max_retries + 1):
+        for attempt in range(retries + 1):
             self._throttle()
             try:
                 response = self._client.models.generate_content(
@@ -180,10 +215,12 @@ class GeminiProvider(VisionProvider):
                 )
                 text = response.text
                 data = json.loads(text)
-                return {
-                    "summary": data.get("summary", ""),
-                    "highlights": data.get("highlights", []),
-                }
+                if purpose == "montage":
+                    return {
+                        "summary": data.get("summary", ""),
+                        "highlights": data.get("highlights", []),
+                    }
+                return data
 
             except Exception as e:
                 last_error = e
@@ -200,8 +237,9 @@ class GeminiProvider(VisionProvider):
                         "or enable billing at https://ai.google.dev"
                     ) from e
 
-                if attempt < max_retries:
-                    wait = min(2 ** attempt * 2, 60)
+                self._back_off()
+                if attempt < retries:
+                    wait = self._retry_wait(attempt)
                     time.sleep(wait)
 
         raise last_error

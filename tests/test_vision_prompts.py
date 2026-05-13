@@ -11,6 +11,8 @@ def test_all_purposes_have_prompts():
             kwargs = {"image_count": 5}
         elif purpose == "narrative":
             kwargs = {"montage_summary": "Event summary", "descriptions": "1. Detail\n2. More"}
+        elif purpose == "batch_describe":
+            kwargs = {"image_count": 4, "event_count": 2, "event_groups": "Event A (photos 1-2):\nEvent B (photos 3-4):"}
         prompt = get_prompt(purpose, **kwargs)
         assert isinstance(prompt, str)
         assert len(prompt) > 50
