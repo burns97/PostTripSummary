@@ -19,21 +19,28 @@
             display: flex;
             align-items: flex-end;
             position: relative;
+            overflow: hidden;
             color: #fff;
             background: #2c3531;
         }
-        .story-hero.has-cover {
-            background-size: cover;
-            background-position: center;
+        .hero-cover {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            max-width: none;
+            object-fit: cover;
         }
         .story-hero::before {
             content: "";
             position: absolute;
             inset: 0;
             background: linear-gradient(180deg, rgba(0,0,0,0.16), rgba(0,0,0,0.68));
+            z-index: 1;
         }
         .hero-inner {
             position: relative;
+            z-index: 2;
             width: min(1100px, 100%);
             margin: 0 auto;
             padding: 4rem 2rem;
@@ -189,8 +196,10 @@
     </style>
 </head>
 <body>
-    <header class="story-hero {% if cover_photo %}has-cover{% endif %}"
-            {% if cover_photo %}style="background-image: url('{{ cover_photo.path | photo_url }}');"{% endif %}>
+    <header class="story-hero {% if cover_photo %}has-cover{% endif %}">
+        {% if cover_photo %}
+        <img class="hero-cover" src="{{ cover_photo.path | photo_url | replace("'", "&#39;") }}" alt="{{ (cover_photo.ai_description or trip.name) | e }}">
+        {% endif %}
         <div class="hero-inner">
             <div class="kicker">Trip Story</div>
             <h1>{{ trip.name }}</h1>

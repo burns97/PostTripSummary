@@ -171,3 +171,36 @@ def test_generate_trip_story_writes_editorial_html(tmp_path):
     assert "By the Numbers" in html
     assert "best-highlight.jpg" in html
     assert "Trip Story" in html
+
+
+def test_generate_trip_story_uses_img_for_cover_photo_with_apostrophe(tmp_path):
+    from post_trip_summary.output.trip_story import generate_trip_story
+
+    trip = Trip(
+        name="Paris 2026",
+        date_range=(date(2026, 3, 5), date(2026, 3, 5)),
+        days=[
+            Day(
+                date=date(2026, 3, 5),
+                events=[
+                    _event(
+                        "day01-event01",
+                        "Eiffel Tower",
+                        "Paris",
+                        "France",
+                        [
+                            _photo("Karen's favorite", is_highlight=True, quality_score=100),
+                        ],
+                    )
+                ],
+            )
+        ],
+    )
+    output_path = tmp_path / "trip-story.html"
+
+    generate_trip_story(trip, output_path)
+
+    html = output_path.read_text(encoding="utf-8")
+    assert "background-image" not in html
+    assert '<img class="hero-cover" src="photos/Karen&#39;s favorite.jpg"' in html
+    assert "Trip Story" in html
