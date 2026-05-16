@@ -154,3 +154,20 @@ def test_select_highlight_photos_returns_kept_highlights_only():
     photos = select_highlight_photos(_trip())
 
     assert [p.path.name for p in photos] == ["low-highlight.jpg", "best-highlight.jpg"]
+
+
+def test_generate_trip_story_writes_editorial_html(tmp_path):
+    from post_trip_summary.output.trip_story import generate_trip_story
+
+    output_path = tmp_path / "trip-story.html"
+    generate_trip_story(_trip(), output_path, map_image="route-map.png")
+
+    html = output_path.read_text(encoding="utf-8")
+    assert output_path.exists()
+    assert "Paris 2026" in html
+    assert "Paris, France" in html
+    assert "route-map.png" in html
+    assert "Eiffel Tower" in html
+    assert "By the Numbers" in html
+    assert "best-highlight.jpg" in html
+    assert "Trip Story" in html
