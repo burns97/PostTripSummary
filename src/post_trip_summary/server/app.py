@@ -677,12 +677,25 @@ def create_app(session: SessionConfig) -> FastAPI:
 
         files = []
 
+        # Generate route map for story/PDF outputs
+        map_image = _generate_static_map(trip, output_dir)
+
         if body.get("photo_prep"):
             from post_trip_summary.output.photo_prep import prepare_photos
             prepare_photos(trip, output_dir)
             files.append({
                 "type": "photo_prep",
                 "path": str(output_dir / "photos"),
+            })
+
+        if body.get("trip_story"):
+            from post_trip_summary.output.trip_story import generate_trip_story
+            out = output_dir / "trip-story.html"
+            generate_trip_story(trip, out, map_image=map_image)
+            files.append({
+                "type": "trip_story",
+                "path": str(out),
+                "preview_url": "/story",
             })
 
         if body.get("detailed_record"):
@@ -694,9 +707,6 @@ def create_app(session: SessionConfig) -> FastAPI:
                 "path": str(out),
                 "preview_url": "/detailed",
             })
-
-        # Generate route map for the PDF
-        map_image = _generate_static_map(trip, output_dir)
 
         if body.get("shareable_pdf"):
             from post_trip_summary.output.shareable_pdf import generate_shareable_pdf
@@ -728,6 +738,17 @@ def create_app(session: SessionConfig) -> FastAPI:
         })
 
     # --- Output preview endpoints ---
+
+    @app.get("/story", response_class=HTMLResponse)
+    def preview_story():
+        if app.state.trip is None:
+            raise HTTPException(404, "No trip loaded")
+        from post_trip_summary.output.trip_story import build_story_context
+        template = env.get_template("trip_story.html")
+        return HTMLResponse(template.render(**build_story_context(
+            app.state.trip,
+            map_image=None,
+        )))
 
     @app.get("/detailed", response_class=HTMLResponse)
     def preview_detailed():

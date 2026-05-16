@@ -7,6 +7,13 @@
 <div id="options-section">
     <div class="option-group">
         <label class="option-label">
+            <input type="checkbox" id="opt-story" checked>
+            <span class="option-info">
+                <strong>Trip Story</strong>
+                <span class="option-desc">Polished, photo-forward HTML story for sharing or keeping</span>
+            </span>
+        </label>
+        <label class="option-label">
             <input type="checkbox" id="opt-detailed" checked>
             <span class="option-info">
                 <strong>Detailed Record</strong>
@@ -167,6 +174,7 @@
 {% block extra_js %}
 <script>
 const TYPE_LABELS = {
+    trip_story: "Trip Story",
     detailed_record: "Detailed Record",
     shareable_pdf: "Shareable Summary",
     blog_post: "Blog Post",
@@ -179,6 +187,7 @@ async function generateOutputs() {
     btn.textContent = 'Generating...';
 
     const outputs = {
+        trip_story: document.getElementById('opt-story').checked,
         detailed_record: document.getElementById('opt-detailed').checked,
         shareable_pdf: document.getElementById('opt-pdf').checked,
         blog_post: document.getElementById('opt-blog').checked,

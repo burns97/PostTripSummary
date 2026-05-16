@@ -476,3 +476,46 @@ def test_preview_blog_endpoint(tmp_path):
     client = TestClient(app)
     response = client.get("/blog")
     assert response.status_code == 200
+
+
+def test_generate_api_trip_story(tmp_path):
+    session = create_session("test-trip", base_dir=tmp_path)
+    session.current_stage = "highlights_done"
+    session.save()
+    from post_trip_summary.server.app import create_app, _build_event_index
+
+    app = create_app(session)
+    app.state.trip = _make_test_trip(tmp_path)
+    app.state.event_index = _build_event_index(app.state.trip)
+    client = TestClient(app)
+
+    response = client.post("/api/generate", json={
+        "trip_story": True,
+        "detailed_record": False,
+        "shareable_pdf": False,
+        "blog_post": False,
+        "photo_prep": False,
+    })
+
+    assert response.status_code == 200
+    data = response.json()
+    assert any(f["type"] == "trip_story" for f in data["files"])
+    assert (session.output_dir / "trip-story.html").exists()
+
+
+def test_preview_story_endpoint(tmp_path):
+    session = create_session("test-trip", base_dir=tmp_path)
+    session.current_stage = "highlights_done"
+    session.save()
+    from post_trip_summary.server.app import create_app, _build_event_index
+
+    app = create_app(session)
+    app.state.trip = _make_test_trip(tmp_path)
+    app.state.event_index = _build_event_index(app.state.trip)
+    client = TestClient(app)
+
+    response = client.get("/story")
+
+    assert response.status_code == 200
+    assert "Trip Story" in response.text
+    assert "Test" in response.text
