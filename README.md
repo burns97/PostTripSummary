@@ -113,7 +113,7 @@ The pipeline runs in stages, saving progress after each step so you can resume a
 | **Enrich** | Uses AI vision (Gemini or Claude) to describe photos and identify landmarks (with cost estimation and approval) |
 | **Pick highlights** | Optional browser-based selection of highlight photos for summary outputs |
 | **Review details** | Final interactive review of descriptions and details |
-| **Generate** | Produces output files: detailed HTML record, shareable PDF, blog post, and a route map |
+| **Generate** | Produces the primary Trip Story plus optional detailed record, shareable PDF, blog post, photo prep, and route map |
 
 ### Restarting from a stage
 
@@ -156,8 +156,9 @@ post-trip-summary pick-highlights iceland-2025
 
 ## Outputs
 
-- **Detailed record** — Full HTML document with every event, photo, and note
-- **Shareable PDF** — A summary with route map suitable for sharing
+- **Trip Story** — Primary polished HTML story with cover photo, day-by-day narrative, highlights, route map, and trip stats
+- **Detailed record** — Full archive HTML document with every event, photo, note, source, and supporting detail
+- **Shareable PDF** — PDF summary with route map suitable for sharing
 - **Blog post** — HTML formatted for publishing
 - **Photo prep** — Organized and selected highlight photos
 
