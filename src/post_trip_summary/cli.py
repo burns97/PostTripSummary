@@ -326,6 +326,7 @@ def generate(slug: str, base_dir: Path | None):
 
     from post_trip_summary.serialization import load_trip
     from post_trip_summary.output.photo_prep import prepare_photos
+    from post_trip_summary.output.trip_story import generate_trip_story
     from post_trip_summary.output.detailed_record import generate_detailed_record
     from post_trip_summary.output.shareable_pdf import generate_shareable_pdf
     from post_trip_summary.output.blog_post import generate_blog_post
@@ -340,11 +341,14 @@ def generate(slug: str, base_dir: Path | None):
     click.echo("  Preparing photos...")
     prepare_photos(trip, output_dir)
 
-    click.echo("  Generating detailed record...")
-    generate_detailed_record(trip, output_dir / "detailed-record.html")
-
     click.echo("  Generating route map...")
     map_path = _generate_static_map(trip, output_dir)
+
+    click.echo("  Generating trip story...")
+    generate_trip_story(trip, output_dir / "trip-story.html", map_image=map_path)
+
+    click.echo("  Generating detailed record...")
+    generate_detailed_record(trip, output_dir / "detailed-record.html")
 
     click.echo("  Generating shareable summary...")
     generate_shareable_pdf(trip, output_dir / "shareable-summary.pdf", map_image=map_path)
