@@ -3,7 +3,8 @@
 from pathlib import Path
 from PIL import Image
 
-from post_trip_summary.models import Trip, Photo
+from post_trip_summary.models import Event, Trip, Photo
+from post_trip_summary.output.trip_story import days_with_story_content, select_cover_photo
 
 try:
     import pillow_heif
@@ -26,7 +27,7 @@ def collect_highlight_photos(trip: Trip) -> list[Photo]:
 
 
 def collect_output_photos(trip: Trip) -> list[Photo]:
-    """Gather kept photos for generated HTML outputs."""
+    """Gather photos referenced by generated HTML outputs."""
     photos: list[Photo] = []
     seen: set[Path] = set()
 
@@ -36,12 +37,27 @@ def collect_output_photos(trip: Trip) -> list[Photo]:
         seen.add(photo.path)
         photos.append(photo)
 
-    for day in trip.days:
+    for photo in collect_highlight_photos(trip):
+        add(photo)
+
+    cover_photo = select_cover_photo(trip)
+    if cover_photo is not None:
+        add(cover_photo)
+
+    for day in days_with_story_content(trip):
         for event in day.events:
-            for photo in event.photos:
+            for photo in _trip_story_event_photos(event):
                 add(photo)
 
     return photos
+
+
+def _trip_story_event_photos(event: Event) -> list[Photo]:
+    kept_photos = [photo for photo in event.photos if photo.is_kept]
+    event_highlights = [photo for photo in kept_photos if photo.is_highlight]
+    if event_highlights:
+        return event_highlights[:6]
+    return kept_photos[:3]
 
 
 def prepare_photos(trip: Trip, output_dir: Path) -> None:

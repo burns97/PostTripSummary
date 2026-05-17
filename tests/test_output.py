@@ -52,29 +52,37 @@ def test_collect_highlight_photos():
     assert photos[0].is_highlight
 
 
-def test_prepare_photos_copies_kept_non_highlight_photos_for_trip_story(tmp_path):
+def test_prepare_photos_copies_trip_story_fallback_photos_without_copying_all_kept(tmp_path):
     from PIL import Image
 
     highlight_path = tmp_path / "highlight.jpg"
     fallback_path = tmp_path / "fallback.jpg"
+    unused_path = tmp_path / "unused.jpg"
     removed_path = tmp_path / "removed.jpg"
-    for path in (highlight_path, fallback_path, removed_path):
+    for path in (highlight_path, fallback_path, unused_path, removed_path):
         Image.new("RGB", (10, 10), color="red").save(path)
 
     loc = Location(lat=48.858, lon=2.294, name="Eiffel Tower", address=None, city="Paris", country="France")
-    photos = [
+    highlighted_photos = [
         Photo(path=highlight_path, timestamp=datetime(2026, 3, 5, 16, 0), gps=None, is_highlight=True),
-        Photo(path=fallback_path, timestamp=datetime(2026, 3, 5, 16, 5), gps=None, is_highlight=False),
+        Photo(path=unused_path, timestamp=datetime(2026, 3, 5, 16, 5), gps=None, is_highlight=False),
         Photo(path=removed_path, timestamp=datetime(2026, 3, 5, 16, 10), gps=None, is_highlight=False, is_kept=False),
+    ]
+    fallback_photos = [
+        Photo(path=fallback_path, timestamp=datetime(2026, 3, 5, 17, 0), gps=None, is_highlight=False),
     ]
     event = Event(id="day01-event01", type="landmark", name="Eiffel Tower",
                   time_range=(datetime(2026, 3, 5, 16, 0), datetime(2026, 3, 5, 17, 0)),
-                  location=loc, photos=photos, description="", notes="", sources=["exif"])
+                  location=loc, photos=highlighted_photos, description="", notes="", sources=["exif"])
+    fallback_event = Event(id="day01-event02", type="walk", name="Walk",
+                           time_range=(datetime(2026, 3, 5, 17, 0), datetime(2026, 3, 5, 18, 0)),
+                           location=loc, photos=fallback_photos, description="", notes="", sources=["exif"])
     trip = Trip(name="Paris 2026", date_range=(date(2026, 3, 5), date(2026, 3, 5)),
-                days=[Day(date=date(2026, 3, 5), events=[event])])
+                days=[Day(date=date(2026, 3, 5), events=[event, fallback_event])])
 
     prepare_photos(trip, tmp_path / "output")
 
     assert (tmp_path / "output" / "photos" / "highlight.jpg").exists()
     assert (tmp_path / "output" / "photos" / "fallback.jpg").exists()
+    assert not (tmp_path / "output" / "photos" / "unused.jpg").exists()
     assert not (tmp_path / "output" / "photos" / "removed.jpg").exists()
