@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from jinja2 import Environment, PackageLoader
+from jinja2 import Environment, PackageLoader, select_autoescape
 
 from post_trip_summary.models import Day, Event, Photo, Trip
 
@@ -125,7 +125,10 @@ def generate_trip_story(trip: Trip, output_path: Path, map_image: str | None = N
     """Render the Trip Story HTML output."""
     from post_trip_summary.output.detailed_record import _format_time_filter, _photo_url_filter
 
-    env = Environment(loader=PackageLoader("post_trip_summary", "templates"))
+    env = Environment(
+        loader=PackageLoader("post_trip_summary", "templates"),
+        autoescape=select_autoescape(["html", "xml"]),
+    )
     env.filters["ftime"] = _format_time_filter
     env.filters["photo_url"] = _photo_url_filter
     template = env.get_template("trip_story.html")

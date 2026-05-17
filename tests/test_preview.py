@@ -32,3 +32,26 @@ def test_preview_summary():
     client = TestClient(app)
     response = client.get("/summary")
     assert response.status_code == 200
+
+
+def test_preview_index_links_trip_story():
+    trip = _trip()
+    app = create_app(trip)
+    client = TestClient(app)
+
+    response = client.get("/")
+
+    assert response.status_code == 200
+    assert '<a href="/story">Trip Story</a>' in response.text
+
+
+def test_preview_story():
+    trip = _trip()
+    app = create_app(trip)
+    client = TestClient(app)
+
+    response = client.get("/story")
+
+    assert response.status_code == 200
+    assert "Trip Story" in response.text
+    assert "Paris 2026" in response.text

@@ -173,6 +173,50 @@ def test_generate_trip_story_writes_editorial_html(tmp_path):
     assert "Trip Story" in html
 
 
+def test_generate_trip_story_escapes_user_and_ai_content(tmp_path):
+    from post_trip_summary.output.trip_story import generate_trip_story
+
+    malicious = "<script>alert(1)</script>"
+    trip = Trip(
+        name=f"Paris {malicious}",
+        date_range=(date(2026, 3, 5), date(2026, 3, 5)),
+        days=[
+            Day(
+                date=date(2026, 3, 5),
+                events=[
+                    _event(
+                        "day01-event01",
+                        f"Tower {malicious}",
+                        f"City {malicious}",
+                        "France",
+                        [
+                            _photo(
+                                "cover",
+                                is_highlight=True,
+                                quality_score=100,
+                            ),
+                        ],
+                        description=f"Description {malicious}",
+                    )
+                ],
+            )
+        ],
+    )
+    trip.days[0].events[0].notes = f"Note {malicious}"
+    trip.days[0].events[0].photos[0].ai_description = f"Alt {malicious}"
+    output_path = tmp_path / "trip-story.html"
+
+    generate_trip_story(trip, output_path)
+
+    html = output_path.read_text(encoding="utf-8")
+    assert "<script>" not in html
+    assert "Paris &lt;script&gt;alert(1)&lt;/script&gt;" in html
+    assert "Tower &lt;script&gt;alert(1)&lt;/script&gt;" in html
+    assert "Description &lt;script&gt;alert(1)&lt;/script&gt;" in html
+    assert "Note &lt;script&gt;alert(1)&lt;/script&gt;" in html
+    assert 'alt="Alt &lt;script&gt;alert(1)&lt;/script&gt;"' in html
+
+
 def test_generate_trip_story_uses_img_for_cover_photo_with_apostrophe(tmp_path):
     from post_trip_summary.output.trip_story import generate_trip_story
 

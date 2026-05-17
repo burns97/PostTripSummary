@@ -198,7 +198,7 @@
 <body>
     <header class="story-hero {% if cover_photo %}has-cover{% endif %}">
         {% if cover_photo %}
-        <img class="hero-cover" src="{{ cover_photo.path | photo_url | replace("'", "&#39;") }}" alt="{{ (cover_photo.ai_description or trip.name) | e }}">
+        <img class="hero-cover" src="{{ cover_photo.path | photo_url }}" alt="{{ cover_photo.ai_description or trip.name }}">
         {% endif %}
         <div class="hero-inner">
             <div class="kicker">Trip Story</div>
