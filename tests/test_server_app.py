@@ -6,7 +6,9 @@ from fastapi.testclient import TestClient
 from PIL import Image
 
 from post_trip_summary.config import create_session
+from post_trip_summary.discovery.serialization import load_vacation_blend, vacation_blend_path
 from post_trip_summary.models import Day, Event, Location, Photo, Trip
+from post_trip_summary.serialization import save_trip
 
 
 def test_create_app_returns_fastapi(tmp_path):
@@ -112,6 +114,139 @@ def _make_test_trip(tmp_path):
         date_range=(date(2026, 3, 5), date(2026, 3, 5)),
         days=[Day(date=date(2026, 3, 5), events=[event])],
     )
+
+
+def _make_discovery_trip(tmp_path):
+    """Create a reviewed trip with metadata that clearly triggers discovery themes."""
+    img_path = tmp_path / "discovery-photo.jpg"
+    img = Image.new("RGB", (100, 100), color="blue")
+    img.save(img_path, "JPEG")
+
+    photo = Photo(path=img_path, timestamp=datetime(2026, 3, 5, 12, 0), gps=(48.858, 2.294))
+    event = Event(
+        id="day01-food-market",
+        type="restaurant",
+        name="Market cafe lunch and coffee tasting",
+        time_range=(datetime(2026, 3, 5, 12, 0), datetime(2026, 3, 5, 13, 30)),
+        location=Location(
+            lat=48.858,
+            lon=2.294,
+            name="Market cafe",
+            address=None,
+            city="Paris",
+            country="France",
+        ),
+        photos=[photo],
+        notes="Dinner, cafe, market, and food memories.",
+    )
+    return Trip(
+        name="Discovery Test",
+        date_range=(date(2026, 3, 5), date(2026, 3, 5)),
+        days=[Day(date=date(2026, 3, 5), events=[event])],
+    )
+
+
+def test_reviewed_stage_redirects_to_discovery(tmp_path):
+    session = create_session("test-trip", base_dir=tmp_path)
+    session.current_stage = "reviewed"
+    session.save()
+    from post_trip_summary.server.app import create_app
+
+    app = create_app(session)
+    client = TestClient(app)
+
+    response = client.get("/", follow_redirects=False)
+
+    assert response.status_code == 307
+    assert response.headers["location"].endswith("/wizard/discovery")
+
+
+def test_discovery_page_renders_writes_artifact_and_keeps_reviewed_stage(tmp_path):
+    session = create_session("test-trip", base_dir=tmp_path)
+    session.current_stage = "reviewed"
+    trip = _make_discovery_trip(tmp_path)
+    save_trip(trip, session.stage_file("reviewed"))
+    session.save()
+    from post_trip_summary.server.app import create_app
+
+    app = create_app(session)
+    client = TestClient(app)
+
+    response = client.get("/wizard/discovery")
+
+    assert response.status_code == 200
+    assert "Trip Discovery" in response.text
+    assert "Food &amp; drink" in response.text or "Food & drink" in response.text
+    assert vacation_blend_path(session.session_dir).exists()
+    assert session.current_stage == "reviewed"
+
+
+def test_discovery_update_saves_themes_advances_and_returns_enrich(tmp_path):
+    session = create_session("test-trip", base_dir=tmp_path)
+    session.current_stage = "reviewed"
+    trip = _make_discovery_trip(tmp_path)
+    save_trip(trip, session.stage_file("reviewed"))
+    session.save()
+    from post_trip_summary.server.app import create_app
+
+    app = create_app(session)
+    client = TestClient(app)
+    client.get("/wizard/discovery")
+
+    response = client.post("/api/discovery/update", json={
+        "primary_theme_ids": ["culture_sightseeing"],
+        "secondary_theme_ids": ["food_drink", "shopping_city"],
+    })
+
+    assert response.status_code == 200
+    assert response.json()["stage"] == "discovered"
+    assert response.json()["next_step"] == "enrich"
+    blend = load_vacation_blend(vacation_blend_path(session.session_dir))
+    assert [theme.theme_id for theme in blend.primary] == ["culture_sightseeing"]
+    assert [theme.theme_id for theme in blend.secondary] == ["food_drink", "shopping_city"]
+
+
+def test_discovery_update_rejects_unknown_theme_ids(tmp_path):
+    session = create_session("test-trip", base_dir=tmp_path)
+    session.current_stage = "reviewed"
+    save_trip(_make_discovery_trip(tmp_path), session.stage_file("reviewed"))
+    session.save()
+    from post_trip_summary.server.app import create_app
+
+    app = create_app(session)
+    client = TestClient(app)
+    client.get("/wizard/discovery")
+
+    response = client.post("/api/discovery/update", json={
+        "primary_theme_ids": ["made_up_theme"],
+        "secondary_theme_ids": [],
+    })
+
+    assert response.status_code == 400
+
+
+def test_discovery_update_rejects_duplicate_or_overlapping_theme_ids(tmp_path):
+    session = create_session("test-trip", base_dir=tmp_path)
+    session.current_stage = "reviewed"
+    save_trip(_make_discovery_trip(tmp_path), session.stage_file("reviewed"))
+    session.save()
+    from post_trip_summary.server.app import create_app
+
+    app = create_app(session)
+    client = TestClient(app)
+    client.get("/wizard/discovery")
+
+    duplicate_response = client.post("/api/discovery/update", json={
+        "primary_theme_ids": ["food_drink", "food_drink"],
+        "secondary_theme_ids": [],
+    })
+    overlap_response = client.post("/api/discovery/update", json={
+        "primary_theme_ids": ["food_drink"],
+        "secondary_theme_ids": ["food_drink"],
+    })
+
+    assert duplicate_response.status_code == 400
+    assert overlap_response.status_code == 400
 
 
 def test_photo_serving_by_event_and_index(tmp_path):
@@ -287,7 +422,7 @@ def test_enrich_estimate_endpoint(tmp_path):
     assert "event_count" in data
 
 
-def test_enrich_page_renders(tmp_path):
+def test_enrich_page_redirects_reviewed_session_to_discovery(tmp_path):
     session = create_session("test-trip", base_dir=tmp_path)
     session.current_stage = "reviewed"
     session.save()
@@ -296,9 +431,9 @@ def test_enrich_page_renders(tmp_path):
     app.state.trip = _make_test_trip(tmp_path)
     app.state.event_index = _build_event_index(app.state.trip)
     client = TestClient(app)
-    response = client.get("/wizard/enrich")
-    assert response.status_code == 200
-    assert "Enrichment" in response.text or "enrich" in response.text.lower()
+    response = client.get("/wizard/enrich", follow_redirects=False)
+    assert response.status_code == 307
+    assert response.headers["location"].endswith("/wizard/discovery")
 
 
 def test_enrich_page_renders_for_discovered_session(tmp_path):

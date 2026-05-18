@@ -66,19 +66,20 @@ STAGE_TO_STEP = {
     "new": "setup",
     "setup": "setup",
     "ingested": "review",
-    "reviewed": "enrich",
+    "reviewed": "discovery",
     "discovered": "enrich",
     "enriched": "highlights",
     "highlights_done": "generate",
     "generated": "generate",
 }
 
-WIZARD_STEPS = ["setup", "ingest", "review", "enrich", "highlights", "generate"]
+WIZARD_STEPS = ["setup", "ingest", "review", "discovery", "enrich", "highlights", "generate"]
 
 STEP_COMPLETED_AT = {
     "setup": "ingested",
     "ingest": "ingested",
     "review": "reviewed",
+    "discovery": "discovered",
     "enrich": "enriched",
     "highlights": "highlights_done",
     "generate": "generated",
@@ -630,10 +631,116 @@ def create_app(session: SessionConfig) -> FastAPI:
         template = env.get_template("review.html")
         return HTMLResponse(template.render(**ctx))
 
+    @app.get("/wizard/discovery", response_class=HTMLResponse)
+    def wizard_discovery():
+        if app.state.trip is None:
+            return RedirectResponse("/wizard/setup", status_code=307)
+
+        from post_trip_summary.discovery.serialization import (
+            load_vacation_blend,
+            vacation_blend_path,
+        )
+        from post_trip_summary.discovery.service import run_discovery_for_session
+        from post_trip_summary.discovery.taxonomy import VACATION_THEMES
+
+        artifact_path = vacation_blend_path(app.state.session.session_dir)
+        if artifact_path.exists():
+            blend = load_vacation_blend(artifact_path)
+        else:
+            blend = run_discovery_for_session(app.state.session, advance_stage=False)
+
+        ctx = _get_wizard_context(app.state.session)
+        ctx["blend"] = blend
+        ctx["themes"] = VACATION_THEMES
+        ctx["theme_labels"] = {theme.id: theme.label for theme in VACATION_THEMES}
+        ctx["theme_options"] = [
+            {"id": theme.id, "label": theme.label, "description": theme.description}
+            for theme in VACATION_THEMES
+        ]
+        template = env.get_template("discovery.html")
+        return HTMLResponse(template.render(**ctx))
+
+    @app.post("/api/discovery/update")
+    async def discovery_update(request: Request):
+        from post_trip_summary.discovery.models import ThemeScore
+        from post_trip_summary.discovery.serialization import (
+            load_vacation_blend,
+            save_vacation_blend,
+            vacation_blend_path,
+        )
+        from post_trip_summary.discovery.taxonomy import get_theme_label, validate_theme_ids
+
+        body = await request.json()
+        primary_ids = body.get("primary_theme_ids", body.get("primary_themes", []))
+        secondary_ids = body.get("secondary_theme_ids", body.get("secondary_themes", []))
+        if not isinstance(primary_ids, list) or not isinstance(secondary_ids, list):
+            raise HTTPException(400, "primary and secondary theme IDs must be lists")
+
+        if len(primary_ids) != len(set(primary_ids)):
+            raise HTTPException(400, "duplicate primary theme IDs")
+        if len(secondary_ids) != len(set(secondary_ids)):
+            raise HTTPException(400, "duplicate secondary theme IDs")
+        overlap = sorted(set(primary_ids).intersection(secondary_ids))
+        if overlap:
+            raise HTTPException(400, f"theme IDs cannot be both primary and secondary: {', '.join(overlap)}")
+
+        try:
+            validate_theme_ids(primary_ids + secondary_ids)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc))
+
+        artifact_path = vacation_blend_path(app.state.session.session_dir)
+        if not artifact_path.exists():
+            raise HTTPException(404, "Vacation blend artifact not found")
+
+        blend = load_vacation_blend(artifact_path)
+        existing_scores = {
+            score.theme_id: score
+            for score in [*blend.primary, *blend.secondary]
+        }
+        diagnostics_scores = blend.diagnostics.get("theme_scores", {})
+        if not isinstance(diagnostics_scores, dict):
+            diagnostics_scores = {}
+
+        def _score_for(theme_id: str) -> ThemeScore:
+            if theme_id in existing_scores:
+                return existing_scores[theme_id]
+            return ThemeScore(
+                theme_id=theme_id,
+                label=get_theme_label(theme_id),
+                score=float(diagnostics_scores.get(theme_id, 0.0)),
+                evidence=[],
+                sample_event_ids=[],
+            )
+
+        previous_selected = {score.theme_id for score in [*blend.primary, *blend.secondary]}
+        selected = set(primary_ids).union(secondary_ids)
+        rejected = set(blend.rejected)
+        rejected.update(previous_selected - selected)
+        rejected.difference_update(selected)
+
+        blend.primary = [_score_for(theme_id) for theme_id in primary_ids]
+        blend.secondary = [_score_for(theme_id) for theme_id in secondary_ids]
+        blend.rejected = sorted(rejected)
+        save_vacation_blend(artifact_path, blend)
+
+        if app.state.session.current_stage == "reviewed":
+            app.state.session.current_stage = "discovered"
+            app.state.session.save()
+
+        return JSONResponse({
+            "stage": app.state.session.current_stage,
+            "next_step": STAGE_TO_STEP.get(app.state.session.current_stage, "enrich"),
+            "primary": [score.label for score in blend.primary],
+            "primary_theme_ids": [score.theme_id for score in blend.primary],
+        })
+
     @app.get("/wizard/enrich", response_class=HTMLResponse)
     def wizard_enrich():
         if app.state.trip is None:
             return RedirectResponse("/wizard/setup", status_code=307)
+        if app.state.session.current_stage == "reviewed":
+            return RedirectResponse("/wizard/discovery", status_code=307)
         # If already enriched, redirect forward
         if app.state.session.current_stage not in ("reviewed", "discovered", "enriched"):
             step = STAGE_TO_STEP.get(app.state.session.current_stage, "setup")

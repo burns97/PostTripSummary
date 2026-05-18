@@ -1,0 +1,246 @@
+{% extends "wizard.html" %}
+
+{% block title %}{{ session.name }} - Discovery{% endblock %}
+
+{% block extra_css %}
+.discovery-header {
+    margin-bottom: 1.5rem;
+}
+.discovery-meta {
+    display: flex; gap: 0.75rem; flex-wrap: wrap; color: #aaa; font-size: 0.9rem;
+}
+.pill {
+    display: inline-flex; align-items: center; gap: 0.4rem;
+    padding: 0.3rem 0.65rem; border: 1px solid #344b75; border-radius: 999px;
+    background: #16213e; color: #e0e0e0;
+}
+.theme-section {
+    margin: 1rem 0 1.5rem 0;
+}
+.theme-section h2 {
+    margin-bottom: 0.75rem;
+}
+.chip-row {
+    display: flex; gap: 0.5rem; flex-wrap: wrap; min-height: 2.4rem;
+}
+.theme-chip {
+    display: inline-flex; align-items: center; gap: 0.45rem;
+    padding: 0.45rem 0.7rem; border-radius: 999px; border: 1px solid #344b75;
+    background: #16213e; color: #eee; font-size: 0.9rem;
+}
+.theme-chip.primary { border-color: #2ecc71; }
+.theme-chip.secondary { border-color: #3498db; }
+.chip-action {
+    border: 0; background: transparent; color: #aaa; cursor: pointer;
+    font-size: 0.9rem; line-height: 1; padding: 0.1rem;
+}
+.chip-action:hover { color: #fff; }
+.theme-picker {
+    display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center;
+    margin-top: 0.8rem;
+}
+.theme-picker select {
+    min-width: 260px; padding: 0.55rem 0.65rem; background: #16213e;
+    border: 1px solid #0f3460; border-radius: 4px; color: #e0e0e0;
+}
+.btn-secondary {
+    padding: 0.55rem 0.9rem; border: 1px solid #45628f; border-radius: 4px;
+    background: #0f3460; color: #e0e0e0; cursor: pointer;
+}
+.btn-secondary:hover { background: #1a4a8a; }
+.actions {
+    display: flex; gap: 0.75rem; align-items: center; margin-top: 1.5rem;
+}
+.save-status {
+    color: #aaa; font-size: 0.9rem;
+}
+details.discovery-details {
+    margin-top: 1.5rem; padding: 1rem; background: #16213e;
+    border: 1px solid #0f3460; border-radius: 8px;
+}
+details.discovery-details summary {
+    cursor: pointer; color: #e0e0e0; font-weight: 600;
+}
+.diagnostics-block {
+    margin-top: 0.75rem; white-space: pre-wrap; overflow: auto;
+    color: #c8c8c8; font-size: 0.85rem;
+}
+.warning-list {
+    margin: 0.75rem 0 0 1.2rem; color: #f1c40f;
+}
+{% endblock %}
+
+{% block content %}
+<div class="discovery-header">
+    <h1>Trip Discovery</h1>
+    <div class="discovery-meta">
+        <span class="pill">Mode: {{ blend.analysis_mode }}</span>
+        <span class="pill">Confidence: {{ blend.confidence }}</span>
+    </div>
+</div>
+
+<section class="theme-section">
+    <h2>Detected primary themes</h2>
+    <div class="chip-row" id="primary-chips"></div>
+    <div class="theme-picker">
+        <select id="primary-select" aria-label="Add primary theme"></select>
+        <button class="btn-secondary" type="button" onclick="addTheme('primary')">Add Primary</button>
+    </div>
+</section>
+
+<section class="theme-section">
+    <h2>Secondary and additional themes</h2>
+    <div class="chip-row" id="secondary-chips"></div>
+    <div class="theme-picker">
+        <select id="secondary-select" aria-label="Add secondary theme"></select>
+        <button class="btn-secondary" type="button" onclick="addTheme('secondary')">Add Secondary</button>
+    </div>
+</section>
+
+<div class="actions">
+    <button class="btn-primary" type="button" onclick="continueToEnrichment()">Continue to Enrichment</button>
+    <span class="save-status" id="save-status"></span>
+</div>
+
+<details class="discovery-details">
+    <summary>Evidence, warnings, and diagnostics</summary>
+    {% if blend.warnings %}
+    <ul class="warning-list">
+        {% for warning in blend.warnings %}
+        <li>{{ warning }}</li>
+        {% endfor %}
+    </ul>
+    {% endif %}
+    <div class="diagnostics-block">
+Primary evidence:
+{% for score in blend.primary %}
+- {{ score.label }}: {{ score.evidence | join("; ") }}
+{% endfor %}
+
+Secondary evidence:
+{% for score in blend.secondary %}
+- {{ score.label }}: {{ score.evidence | join("; ") }}
+{% endfor %}
+
+Diagnostics:
+{{ blend.diagnostics | tojson(indent=2) }}
+    </div>
+</details>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+const THEMES = {{ theme_options | tojson }};
+const LABELS = {{ theme_labels | tojson }};
+let primaryThemeIds = {{ blend.primary | map(attribute='theme_id') | list | tojson }};
+let secondaryThemeIds = {{ blend.secondary | map(attribute='theme_id') | list | tojson }};
+
+function labelFor(themeId) {
+    return LABELS[themeId] || themeId;
+}
+
+function availableThemes() {
+    const selected = new Set([...primaryThemeIds, ...secondaryThemeIds]);
+    return THEMES.filter(theme => !selected.has(theme.id));
+}
+
+function renderSelect(selectId) {
+    const select = document.getElementById(selectId);
+    select.innerHTML = '';
+    for (const theme of availableThemes()) {
+        const option = document.createElement('option');
+        option.value = theme.id;
+        option.textContent = theme.label;
+        option.title = theme.description;
+        select.appendChild(option);
+    }
+    select.disabled = select.options.length === 0;
+}
+
+function renderChips(kind) {
+    const ids = kind === 'primary' ? primaryThemeIds : secondaryThemeIds;
+    const row = document.getElementById(kind + '-chips');
+    row.innerHTML = '';
+    for (const themeId of ids) {
+        const chip = document.createElement('span');
+        chip.className = 'theme-chip ' + kind;
+        chip.textContent = labelFor(themeId);
+
+        if (kind === 'secondary') {
+            const promote = document.createElement('button');
+            promote.type = 'button';
+            promote.className = 'chip-action';
+            promote.title = 'Promote to primary';
+            promote.textContent = 'Promote';
+            promote.onclick = () => promoteTheme(themeId);
+            chip.appendChild(promote);
+        }
+
+        const remove = document.createElement('button');
+        remove.type = 'button';
+        remove.className = 'chip-action';
+        remove.title = 'Remove theme';
+        remove.textContent = 'Remove';
+        remove.onclick = () => removeTheme(kind, themeId);
+        chip.appendChild(remove);
+        row.appendChild(chip);
+    }
+}
+
+function render() {
+    renderChips('primary');
+    renderChips('secondary');
+    renderSelect('primary-select');
+    renderSelect('secondary-select');
+}
+
+function addTheme(kind) {
+    const select = document.getElementById(kind + '-select');
+    if (!select.value) return;
+    if (kind === 'primary') {
+        primaryThemeIds.push(select.value);
+    } else {
+        secondaryThemeIds.push(select.value);
+    }
+    render();
+}
+
+function removeTheme(kind, themeId) {
+    if (kind === 'primary') {
+        primaryThemeIds = primaryThemeIds.filter(id => id !== themeId);
+    } else {
+        secondaryThemeIds = secondaryThemeIds.filter(id => id !== themeId);
+    }
+    render();
+}
+
+function promoteTheme(themeId) {
+    secondaryThemeIds = secondaryThemeIds.filter(id => id !== themeId);
+    if (!primaryThemeIds.includes(themeId)) {
+        primaryThemeIds.push(themeId);
+    }
+    render();
+}
+
+async function continueToEnrichment() {
+    const status = document.getElementById('save-status');
+    status.textContent = 'Saving...';
+    const response = await fetch('/api/discovery/update', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+            primary_theme_ids: primaryThemeIds,
+            secondary_theme_ids: secondaryThemeIds
+        })
+    });
+    const data = await response.json();
+    if (!response.ok) {
+        status.textContent = data.detail || 'Save failed';
+        return;
+    }
+    window.location.href = '/wizard/' + data.next_step;
+}
+
+document.addEventListener('DOMContentLoaded', render);
+</script>
+{% endblock %}
