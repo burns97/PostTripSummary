@@ -60,7 +60,7 @@ def test_config_settings_defaults(tmp_path):
 
 def test_new_stages_list():
     from post_trip_summary.config import STAGES
-    assert STAGES == ["new", "setup", "ingested", "reviewed", "enriched", "highlights_done", "generated"]
+    assert STAGES == ["new", "setup", "ingested", "reviewed", "discovered", "enriched", "highlights_done", "generated"]
 
 
 def test_stage_file_ingested(tmp_path):

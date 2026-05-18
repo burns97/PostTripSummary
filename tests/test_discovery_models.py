@@ -176,7 +176,7 @@ def test_vacation_blend_from_dict_deep_copies_nested_diagnostics():
     }
 
 
-def test_task_one_does_not_expose_persistence_helpers():
-    assert not hasattr(serialization, "vacation_blend_path")
-    assert not hasattr(serialization, "save_vacation_blend")
-    assert not hasattr(serialization, "load_vacation_blend")
+def test_task_three_exposes_persistence_helpers():
+    assert hasattr(serialization, "vacation_blend_path")
+    assert hasattr(serialization, "save_vacation_blend")
+    assert hasattr(serialization, "load_vacation_blend")

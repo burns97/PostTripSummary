@@ -1,6 +1,9 @@
 """Serialization helpers for Vacation Blend artifacts."""
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 from post_trip_summary.discovery.models import ThemeScore, VacationBlend
 from post_trip_summary.discovery.taxonomy import validate_theme_ids
 
@@ -64,3 +67,19 @@ def vacation_blend_from_dict(data: dict) -> VacationBlend:
     )
     vacation_blend_to_dict(blend)
     return blend
+
+
+def vacation_blend_path(session_dir: Path) -> Path:
+    return session_dir / "vacation_blend.json"
+
+
+def save_vacation_blend(path: Path, blend: VacationBlend) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(vacation_blend_to_dict(blend), indent=2),
+        encoding="utf-8",
+    )
+
+
+def load_vacation_blend(path: Path) -> VacationBlend:
+    return vacation_blend_from_dict(json.loads(path.read_text(encoding="utf-8")))
