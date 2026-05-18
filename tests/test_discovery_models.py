@@ -1,34 +1,60 @@
-from pathlib import Path
+from dataclasses import fields
 
 import pytest
 
 from post_trip_summary.discovery.models import ThemeScore, VacationBlend
 from post_trip_summary.discovery.serialization import (
-    decode_vacation_blend,
-    encode_vacation_blend,
-    load_vacation_blend,
-    save_vacation_blend,
+    vacation_blend_from_dict,
+    vacation_blend_to_dict,
 )
-from post_trip_summary.discovery.taxonomy import THEME_BY_ID, validate_theme_ids
+import post_trip_summary.discovery.serialization as serialization
+from post_trip_summary.discovery.taxonomy import (
+    VACATION_THEMES,
+    get_theme_label,
+    validate_theme_ids,
+)
 
 
-def test_taxonomy_has_expected_theme_ids():
+def test_theme_score_has_exact_requested_fields():
+    assert [field.name for field in fields(ThemeScore)] == [
+        "theme_id",
+        "label",
+        "score",
+        "evidence",
+        "sample_event_ids",
+    ]
+
+
+def test_vacation_blend_has_exact_requested_fields():
+    assert [field.name for field in fields(VacationBlend)] == [
+        "analysis_mode",
+        "confidence",
+        "primary",
+        "secondary",
+        "rejected",
+        "diagnostics",
+        "warnings",
+    ]
+
+
+def test_taxonomy_has_expected_theme_ids_and_labels():
     expected = {
-        "road_trip",
-        "adventure_outdoors",
-        "nature_wildlife",
-        "culture_sightseeing",
-        "food_drink",
-        "people_social",
-        "nightlife_events",
-        "beach_relaxation",
-        "resort_luxury",
-        "family_milestone",
+        "road_trip": "Road trip",
+        "adventure_outdoors": "Adventure & outdoors",
+        "culture_sightseeing": "Culture & sightseeing",
+        "food_drink": "Food & drink",
+        "beach_relaxation": "Beach & relaxation",
+        "nightlife_events": "Nightlife & events",
+        "family_friends": "Family & friends",
+        "resort_luxury": "Resort & luxury",
+        "shopping_city": "Shopping & city life",
+        "wellness_slow": "Wellness & slow travel",
+        "nature_wildlife": "Nature & wildlife",
     }
 
-    assert set(THEME_BY_ID) == expected
-    assert THEME_BY_ID["road_trip"].label == "Road Trip"
-    assert THEME_BY_ID["beach_relaxation"].label == "Beach & Relaxation"
+    assert {theme.id: theme.label for theme in VACATION_THEMES} == expected
+    assert get_theme_label("road_trip") == "Road trip"
+    assert get_theme_label("wellness_slow") == "Wellness & slow travel"
 
 
 def test_validate_theme_ids_rejects_unknown():
@@ -36,35 +62,64 @@ def test_validate_theme_ids_rejects_unknown():
         validate_theme_ids(["road_trip", "made_up_theme"])
 
 
-def test_vacation_blend_round_trips_json(tmp_path):
+def test_vacation_blend_round_trips_plain_dict():
     blend = VacationBlend(
-        primary_themes=["road_trip", "adventure_outdoors"],
-        secondary_themes=["food_drink"],
-        rejected_themes=["nightlife_events"],
+        analysis_mode="metadata_only",
         confidence="high",
-        evidence=["Many location changes", "Outdoor place names"],
-        theme_scores=[
+        primary=[
             ThemeScore(
                 theme_id="road_trip",
+                label="Road trip",
                 score=82.5,
-                confidence="high",
                 evidence=["Travel across 8 cities"],
-                sources=["metadata"],
+                sample_event_ids=["event-1", "event-2"],
             )
         ],
-        analysis_mode="metadata_only",
-        sample_size=0,
-        estimated_cost=0.0,
+        secondary=[
+            ThemeScore(
+                theme_id="food_drink",
+                label="Food & drink",
+                score=45.0,
+                evidence=["Several restaurant stops"],
+                sample_event_ids=["event-3"],
+            )
+        ],
+        rejected=["nightlife_events"],
+        diagnostics={"sample_size": 0, "estimated_cost": 0.0},
         warnings=["Local AI disabled"],
     )
 
-    encoded = encode_vacation_blend(blend)
-    decoded = decode_vacation_blend(encoded)
+    encoded = vacation_blend_to_dict(blend)
 
-    assert decoded == blend
+    assert encoded == {
+        "analysis_mode": "metadata_only",
+        "confidence": "high",
+        "primary": [
+            {
+                "theme_id": "road_trip",
+                "label": "Road trip",
+                "score": 82.5,
+                "evidence": ["Travel across 8 cities"],
+                "sample_event_ids": ["event-1", "event-2"],
+            }
+        ],
+        "secondary": [
+            {
+                "theme_id": "food_drink",
+                "label": "Food & drink",
+                "score": 45.0,
+                "evidence": ["Several restaurant stops"],
+                "sample_event_ids": ["event-3"],
+            }
+        ],
+        "rejected": ["nightlife_events"],
+        "diagnostics": {"sample_size": 0, "estimated_cost": 0.0},
+        "warnings": ["Local AI disabled"],
+    }
+    assert vacation_blend_from_dict(encoded) == blend
 
-    path = tmp_path / "vacation_blend.json"
-    save_vacation_blend(path, blend)
-    loaded = load_vacation_blend(path)
 
-    assert loaded == blend
+def test_task_one_does_not_expose_persistence_helpers():
+    assert not hasattr(serialization, "vacation_blend_path")
+    assert not hasattr(serialization, "save_vacation_blend")
+    assert not hasattr(serialization, "load_vacation_blend")

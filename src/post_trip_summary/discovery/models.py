@@ -1,7 +1,7 @@
 """Dataclasses for Vacation Blend Discovery."""
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 CONFIDENCE_LEVELS = {"low", "medium", "high"}
 
@@ -16,31 +16,21 @@ class ThemeDefinition:
 @dataclass
 class ThemeScore:
     theme_id: str
+    label: str
     score: float
-    confidence: str
-    evidence: list[str] = field(default_factory=list)
-    sources: list[str] = field(default_factory=list)
-
-    def __post_init__(self) -> None:
-        if self.confidence not in CONFIDENCE_LEVELS:
-            raise ValueError(f"invalid confidence: {self.confidence}")
-        self.score = max(0.0, min(100.0, float(self.score)))
+    evidence: list[str]
+    sample_event_ids: list[str]
 
 
 @dataclass
 class VacationBlend:
-    primary_themes: list[str]
-    secondary_themes: list[str]
-    rejected_themes: list[str]
-    confidence: str
-    evidence: list[str]
-    theme_scores: list[ThemeScore]
     analysis_mode: str
-    sample_size: int = 0
-    local_model: str | None = None
-    cloud_model: str | None = None
-    estimated_cost: float = 0.0
-    warnings: list[str] = field(default_factory=list)
+    confidence: str
+    primary: list[ThemeScore]
+    secondary: list[ThemeScore]
+    rejected: list[str]
+    diagnostics: dict[str, object]
+    warnings: list[str]
 
     def __post_init__(self) -> None:
         if self.confidence not in CONFIDENCE_LEVELS:
