@@ -5,6 +5,14 @@ from post_trip_summary.discovery.models import ThemeScore, VacationBlend
 from post_trip_summary.discovery.taxonomy import validate_theme_ids
 
 
+def _copy_plain_data(value: object) -> object:
+    if isinstance(value, dict):
+        return {key: _copy_plain_data(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_copy_plain_data(item) for item in value]
+    return value
+
+
 def _theme_score_to_dict(score: ThemeScore) -> dict:
     return {
         "theme_id": score.theme_id,
@@ -35,19 +43,23 @@ def vacation_blend_to_dict(blend: VacationBlend) -> dict:
         "primary": [_theme_score_to_dict(score) for score in blend.primary],
         "secondary": [_theme_score_to_dict(score) for score in blend.secondary],
         "rejected": list(blend.rejected),
-        "diagnostics": dict(blend.diagnostics),
+        "diagnostics": _copy_plain_data(blend.diagnostics),
         "warnings": list(blend.warnings),
     }
 
 
 def vacation_blend_from_dict(data: dict) -> VacationBlend:
+    diagnostics = _copy_plain_data(data.get("diagnostics", {}))
+    if not isinstance(diagnostics, dict):
+        raise ValueError("diagnostics must be a dict")
+
     blend = VacationBlend(
         analysis_mode=data["analysis_mode"],
         confidence=data["confidence"],
         primary=[_theme_score_from_dict(item) for item in data.get("primary", [])],
         secondary=[_theme_score_from_dict(item) for item in data.get("secondary", [])],
         rejected=list(data.get("rejected", [])),
-        diagnostics=dict(data.get("diagnostics", {})),
+        diagnostics=diagnostics,
         warnings=list(data.get("warnings", [])),
     )
     vacation_blend_to_dict(blend)

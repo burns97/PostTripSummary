@@ -120,6 +120,62 @@ def test_vacation_blend_round_trips_plain_dict():
     assert vacation_blend_from_dict(encoded) == blend
 
 
+def test_vacation_blend_to_dict_deep_copies_nested_diagnostics():
+    blend = VacationBlend(
+        analysis_mode="metadata_only",
+        confidence="medium",
+        primary=[],
+        secondary=[],
+        rejected=[],
+        diagnostics={
+            "counts": {
+                "events_by_theme": {"road_trip": 3},
+                "sample_event_ids": ["event-1", "event-2"],
+            }
+        },
+        warnings=[],
+    )
+
+    encoded = vacation_blend_to_dict(blend)
+    encoded["diagnostics"]["counts"]["events_by_theme"]["road_trip"] = 99
+    encoded["diagnostics"]["counts"]["sample_event_ids"].append("event-3")
+
+    assert blend.diagnostics == {
+        "counts": {
+            "events_by_theme": {"road_trip": 3},
+            "sample_event_ids": ["event-1", "event-2"],
+        }
+    }
+
+
+def test_vacation_blend_from_dict_deep_copies_nested_diagnostics():
+    data = {
+        "analysis_mode": "metadata_only",
+        "confidence": "medium",
+        "primary": [],
+        "secondary": [],
+        "rejected": [],
+        "diagnostics": {
+            "counts": {
+                "events_by_theme": {"road_trip": 3},
+                "sample_event_ids": ["event-1", "event-2"],
+            }
+        },
+        "warnings": [],
+    }
+
+    blend = vacation_blend_from_dict(data)
+    blend.diagnostics["counts"]["events_by_theme"]["road_trip"] = 99
+    blend.diagnostics["counts"]["sample_event_ids"].append("event-3")
+
+    assert data["diagnostics"] == {
+        "counts": {
+            "events_by_theme": {"road_trip": 3},
+            "sample_event_ids": ["event-1", "event-2"],
+        }
+    }
+
+
 def test_task_one_does_not_expose_persistence_helpers():
     assert not hasattr(serialization, "vacation_blend_path")
     assert not hasattr(serialization, "save_vacation_blend")
