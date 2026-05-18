@@ -58,6 +58,37 @@ def test_config_settings_defaults(tmp_path):
     assert session.settings["cluster_distance_meters"] == 200
 
 
+def test_settings_merge_preserves_deep_nested_defaults(monkeypatch):
+    import post_trip_summary.config as config
+
+    defaults = {
+        "discovery": {
+            "mode": "metadata_only",
+            "local": {
+                "model": "default-model",
+                "limits": {"images": 150, "timeout": 30},
+            },
+        }
+    }
+    saved = {
+        "discovery": {
+            "local": {
+                "limits": {"timeout": 60},
+            },
+        }
+    }
+    monkeypatch.setattr(config, "DEFAULT_SETTINGS", defaults)
+
+    merged = config._merge_settings(saved)
+    merged["discovery"]["local"]["limits"]["images"] = 999
+    saved["discovery"]["local"]["limits"]["timeout"] = 10
+
+    assert merged["discovery"]["mode"] == "metadata_only"
+    assert merged["discovery"]["local"]["model"] == "default-model"
+    assert merged["discovery"]["local"]["limits"] == {"images": 999, "timeout": 60}
+    assert defaults["discovery"]["local"]["limits"]["images"] == 150
+
+
 def test_new_stages_list():
     from post_trip_summary.config import STAGES
     assert STAGES == ["new", "setup", "ingested", "reviewed", "discovered", "enriched", "highlights_done", "generated"]

@@ -251,6 +251,23 @@ def test_advance_stage(tmp_path):
     assert response.json()["stage"] == "reviewed"
 
 
+def test_advance_stage_from_reviewed_returns_discovered_and_enrich_next_step(tmp_path):
+    session = create_session("test-trip", base_dir=tmp_path)
+    session.current_stage = "reviewed"
+    session.save()
+    from post_trip_summary.server.app import create_app
+    app = create_app(session)
+    app.state.trip = _make_test_trip(tmp_path)
+    from post_trip_summary.server.app import _build_event_index
+    app.state.event_index = _build_event_index(app.state.trip)
+    client = TestClient(app)
+
+    response = client.post("/api/stage/advance")
+
+    assert response.status_code == 200
+    assert response.json() == {"stage": "discovered", "next_step": "enrich"}
+
+
 def test_enrich_estimate_endpoint(tmp_path):
     session = create_session("test-trip", base_dir=tmp_path)
     session.current_stage = "reviewed"
@@ -280,6 +297,22 @@ def test_enrich_page_renders(tmp_path):
     app.state.event_index = _build_event_index(app.state.trip)
     client = TestClient(app)
     response = client.get("/wizard/enrich")
+    assert response.status_code == 200
+    assert "Enrichment" in response.text or "enrich" in response.text.lower()
+
+
+def test_enrich_page_renders_for_discovered_session(tmp_path):
+    session = create_session("test-trip", base_dir=tmp_path)
+    session.current_stage = "discovered"
+    session.save()
+    from post_trip_summary.server.app import create_app, _build_event_index
+    app = create_app(session)
+    app.state.trip = _make_test_trip(tmp_path)
+    app.state.event_index = _build_event_index(app.state.trip)
+    client = TestClient(app)
+
+    response = client.get("/wizard/enrich", follow_redirects=False)
+
     assert response.status_code == 200
     assert "Enrichment" in response.text or "enrich" in response.text.lower()
 

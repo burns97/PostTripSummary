@@ -28,14 +28,18 @@ DEFAULT_SETTINGS = {
 STAGES = ["new", "setup", "ingested", "reviewed", "discovered", "enriched", "highlights_done", "generated"]
 
 
-def _merge_settings(settings: dict | None) -> dict:
-    merged = deepcopy(DEFAULT_SETTINGS)
-    for key, value in (settings or {}).items():
+def _merge_dicts(defaults: dict, overrides: dict) -> dict:
+    merged = deepcopy(defaults)
+    for key, value in overrides.items():
         if isinstance(value, dict) and isinstance(merged.get(key), dict):
-            merged[key] = {**merged[key], **value}
+            merged[key] = _merge_dicts(merged[key], value)
         else:
             merged[key] = deepcopy(value)
     return merged
+
+
+def _merge_settings(settings: dict | None) -> dict:
+    return _merge_dicts(DEFAULT_SETTINGS, settings or {})
 
 
 def _slugify(name: str) -> str:

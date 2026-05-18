@@ -67,6 +67,7 @@ STAGE_TO_STEP = {
     "setup": "setup",
     "ingested": "review",
     "reviewed": "enrich",
+    "discovered": "enrich",
     "enriched": "highlights",
     "highlights_done": "generate",
     "generated": "generate",
@@ -634,7 +635,7 @@ def create_app(session: SessionConfig) -> FastAPI:
         if app.state.trip is None:
             return RedirectResponse("/wizard/setup", status_code=307)
         # If already enriched, redirect forward
-        if app.state.session.current_stage not in ("reviewed", "enriched"):
+        if app.state.session.current_stage not in ("reviewed", "discovered", "enriched"):
             step = STAGE_TO_STEP.get(app.state.session.current_stage, "setup")
             if step not in ("enrich", "highlights", "generate"):
                 return RedirectResponse(f"/wizard/{step}", status_code=307)

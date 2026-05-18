@@ -4,10 +4,12 @@ import pytest
 
 from post_trip_summary.discovery.models import ThemeScore, VacationBlend
 from post_trip_summary.discovery.serialization import (
+    load_vacation_blend,
+    save_vacation_blend,
     vacation_blend_from_dict,
+    vacation_blend_path,
     vacation_blend_to_dict,
 )
-import post_trip_summary.discovery.serialization as serialization
 from post_trip_summary.discovery.taxonomy import (
     VACATION_THEMES,
     get_theme_label,
@@ -176,7 +178,27 @@ def test_vacation_blend_from_dict_deep_copies_nested_diagnostics():
     }
 
 
-def test_task_three_exposes_persistence_helpers():
-    assert hasattr(serialization, "vacation_blend_path")
-    assert hasattr(serialization, "save_vacation_blend")
-    assert hasattr(serialization, "load_vacation_blend")
+def test_vacation_blend_persistence_helpers_round_trip(tmp_path):
+    blend = VacationBlend(
+        analysis_mode="metadata_only",
+        confidence="medium",
+        primary=[
+            ThemeScore(
+                theme_id="culture_sightseeing",
+                label="Culture & sightseeing",
+                score=55.0,
+                evidence=["Museum visit"],
+                sample_event_ids=["event-1"],
+            )
+        ],
+        secondary=[],
+        rejected=[],
+        diagnostics={"sample_size": 1},
+        warnings=[],
+    )
+    path = vacation_blend_path(tmp_path / "session")
+
+    save_vacation_blend(path, blend)
+
+    assert path == tmp_path / "session" / "vacation_blend.json"
+    assert load_vacation_blend(path) == blend
