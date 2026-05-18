@@ -117,6 +117,48 @@ def test_maui_resort_trip_detects_beach_and_luxury_without_primary_road_trip():
     assert "road_trip" not in _primary_ids(blend)
 
 
+def test_same_location_resort_trip_with_scenic_road_words_is_not_road_trip_primary():
+    trip = _trip(
+        [
+            [
+                _event(
+                    "resort-road-0",
+                    "Scenic road overlook viewpoint by resort beach",
+                    "Wailea",
+                    "United States",
+                    20.69,
+                    -156.44,
+                ),
+                _event(
+                    "resort-road-1",
+                    "Beach pool spa near scenic route lookout",
+                    "Wailea",
+                    "United States",
+                    20.69,
+                    -156.44,
+                ),
+            ],
+            [
+                _event(
+                    "resort-road-2",
+                    "Hotel suite and road viewpoint ocean sunset",
+                    "Wailea",
+                    "United States",
+                    20.69,
+                    -156.44,
+                    event_type="hotel",
+                ),
+            ],
+        ]
+    )
+
+    blend = discover_vacation_blend(trip)
+
+    assert "road_trip" not in _primary_ids(blend)
+    assert "beach_relaxation" in _primary_ids(blend)
+    assert "resort_luxury" in _detected_ids(blend)
+
+
 def test_las_vegas_city_trip_detects_food_culture_and_nightlife():
     trip = _trip(
         [

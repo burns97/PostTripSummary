@@ -213,6 +213,13 @@ def discover_vacation_blend(trip: Trip) -> VacationBlend:
         for event_id in movement["movement_event_ids"]:
             _add_sample(sample_event_ids["road_trip"], event_id)
 
+    road_trip_eligible = _is_road_trip_eligible(movement)
+    if not road_trip_eligible:
+        theme_scores["road_trip"] = min(
+            theme_scores["road_trip"],
+            PRIMARY_THRESHOLD - 0.1,
+        )
+
     clamped_scores = {
         theme_id: _clamp_score(score) for theme_id, score in theme_scores.items()
     }
@@ -248,6 +255,7 @@ def discover_vacation_blend(trip: Trip) -> VacationBlend:
         "country_count": movement["country_count"],
         "day_count": movement["day_count"],
         "gps_distance_km": round(movement["gps_distance_km"], 1),
+        "road_trip_eligible": road_trip_eligible,
         "theme_scores": clamped_scores,
     }
 
@@ -313,12 +321,12 @@ def _movement_diagnostics(trip: Trip, events: list[Event]) -> dict[str, object]:
 
 
 def _road_trip_movement_score(movement: dict[str, object]) -> float:
+    if not _is_road_trip_eligible(movement):
+        return 0.0
+
     city_count = int(movement["city_count"])
     day_count = int(movement["day_count"])
     gps_distance_km = float(movement["gps_distance_km"])
-    if city_count < 2 or day_count < 2 or gps_distance_km < 25.0:
-        return 0.0
-
     score = 18.0
     score += min(24.0, (city_count - 1) * 8.0)
     score += min(12.0, (day_count - 1) * 4.0)
@@ -327,6 +335,13 @@ def _road_trip_movement_score(movement: dict[str, object]) -> float:
     elif gps_distance_km >= 50.0:
         score += 6.0
     return score
+
+
+def _is_road_trip_eligible(movement: dict[str, object]) -> bool:
+    city_count = int(movement["city_count"])
+    day_count = int(movement["day_count"])
+    gps_distance_km = float(movement["gps_distance_km"])
+    return city_count >= 2 and day_count >= 2 and gps_distance_km >= 25.0
 
 
 def _path_distance_km(points: list[tuple[float, float]]) -> float:
