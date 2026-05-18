@@ -55,6 +55,7 @@ def test_taxonomy_has_expected_theme_ids_and_labels():
     assert {theme.id: theme.label for theme in VACATION_THEMES} == expected
     assert get_theme_label("road_trip") == "Road trip"
     assert get_theme_label("wellness_slow") == "Wellness & slow travel"
+    assert get_theme_label("unexpected_theme") == "unexpected_theme"
 
 
 def test_validate_theme_ids_rejects_unknown():

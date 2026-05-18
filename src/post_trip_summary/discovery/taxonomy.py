@@ -21,7 +21,10 @@ _THEME_BY_ID = {theme.id: theme for theme in VACATION_THEMES}
 
 
 def get_theme_label(theme_id: str) -> str:
-    return _THEME_BY_ID[theme_id].label
+    theme = _THEME_BY_ID.get(theme_id)
+    if theme is None:
+        return theme_id
+    return theme.label
 
 
 def validate_theme_ids(theme_ids: list[str]) -> None:
