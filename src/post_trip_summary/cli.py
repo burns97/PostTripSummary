@@ -318,7 +318,11 @@ def preview(slug: str, port: int, base_dir: Path | None):
 def discover(slug: str, base_dir: Path | None):
     """Run Vacation Blend discovery for reviewed trip data."""
     base = base_dir or DEFAULT_BASE_DIR
-    session = load_session(slug, base_dir=base)
+    try:
+        session = load_session(slug, base_dir=base)
+    except FileNotFoundError:
+        raise click.ClickException(f"Session '{slug}' not found.")
+
     reviewed_file = session.stage_file("reviewed")
     if not reviewed_file.exists():
         click.echo("No reviewed trip data. Complete timeline review first.")

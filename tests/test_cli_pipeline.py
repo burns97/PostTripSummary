@@ -87,6 +87,8 @@ def test_discover_command_creates_vacation_blend(tmp_path):
     assert result.exit_code == 0
     assert "Vacation Blend" in result.output
     assert "Analysis mode: metadata_only" in result.output
+    assert "Primary themes:" in result.output
+    assert "Saved artifact:" in result.output
     assert (session.session_dir / "vacation_blend.json").exists()
     assert load_session("paris-2026", base_dir=tmp_path).current_stage == "discovered"
 
@@ -101,3 +103,12 @@ def test_discover_command_requires_reviewed_data(tmp_path):
 
     assert result.exit_code != 0
     assert "No reviewed trip data" in result.output
+
+
+def test_discover_command_reports_missing_session(tmp_path):
+    runner = CliRunner()
+
+    result = runner.invoke(cli, ["discover", "missing-trip", "--base-dir", str(tmp_path)])
+
+    assert result.exit_code != 0
+    assert "Session 'missing-trip' not found" in result.output
