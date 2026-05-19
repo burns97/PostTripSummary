@@ -387,6 +387,7 @@ def create_app(session: SessionConfig) -> FastAPI:
         save_targets = {
             "ingested": "reviewed",
             "reviewed": "reviewed",
+            "discovered": "reviewed",
             "enriched": "enriched",
             "highlights_done": "highlights_done",
             "generated": "highlights_done",
@@ -604,6 +605,8 @@ def create_app(session: SessionConfig) -> FastAPI:
     @app.post("/api/stage/advance")
     async def advance_stage(request: Request):
         current = app.state.session.current_stage
+        if current == "reviewed":
+            return JSONResponse({"stage": current, "next_step": STAGE_TO_STEP[current]})
         idx = STAGES.index(current)
         if idx + 1 < len(STAGES):
             app.state.session.current_stage = STAGES[idx + 1]
@@ -670,11 +673,19 @@ def create_app(session: SessionConfig) -> FastAPI:
         )
         from post_trip_summary.discovery.taxonomy import get_theme_label, validate_theme_ids
 
-        body = await request.json()
+        try:
+            body = await request.json()
+        except Exception:
+            raise HTTPException(400, "Malformed JSON body")
+        if not isinstance(body, dict):
+            raise HTTPException(400, "JSON body must be an object")
+
         primary_ids = body.get("primary_theme_ids", body.get("primary_themes", []))
         secondary_ids = body.get("secondary_theme_ids", body.get("secondary_themes", []))
         if not isinstance(primary_ids, list) or not isinstance(secondary_ids, list):
             raise HTTPException(400, "primary and secondary theme IDs must be lists")
+        if not all(isinstance(theme_id, str) for theme_id in primary_ids + secondary_ids):
+            raise HTTPException(400, "theme IDs must be strings")
 
         if len(primary_ids) != len(set(primary_ids)):
             raise HTTPException(400, "duplicate primary theme IDs")

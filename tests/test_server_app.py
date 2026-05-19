@@ -8,7 +8,7 @@ from PIL import Image
 from post_trip_summary.config import create_session
 from post_trip_summary.discovery.serialization import load_vacation_blend, vacation_blend_path
 from post_trip_summary.models import Day, Event, Location, Photo, Trip
-from post_trip_summary.serialization import save_trip
+from post_trip_summary.serialization import load_trip, save_trip
 
 
 def test_create_app_returns_fastapi(tmp_path):
@@ -249,6 +249,54 @@ def test_discovery_update_rejects_duplicate_or_overlapping_theme_ids(tmp_path):
     assert overlap_response.status_code == 400
 
 
+def test_discovery_update_rejects_malformed_or_non_object_json(tmp_path):
+    session = create_session("test-trip", base_dir=tmp_path)
+    session.current_stage = "reviewed"
+    save_trip(_make_discovery_trip(tmp_path), session.stage_file("reviewed"))
+    session.save()
+    from post_trip_summary.server.app import create_app
+
+    app = create_app(session)
+    client = TestClient(app, raise_server_exceptions=False)
+    client.get("/wizard/discovery")
+
+    malformed_response = client.post(
+        "/api/discovery/update",
+        content="{",
+        headers={"content-type": "application/json"},
+    )
+    array_response = client.post("/api/discovery/update", json=[
+        {"primary_theme_ids": ["food_drink"], "secondary_theme_ids": []}
+    ])
+
+    assert malformed_response.status_code == 400
+    assert array_response.status_code == 400
+
+
+def test_discovery_update_rejects_non_list_or_non_string_theme_ids(tmp_path):
+    session = create_session("test-trip", base_dir=tmp_path)
+    session.current_stage = "reviewed"
+    save_trip(_make_discovery_trip(tmp_path), session.stage_file("reviewed"))
+    session.save()
+    from post_trip_summary.server.app import create_app
+
+    app = create_app(session)
+    client = TestClient(app, raise_server_exceptions=False)
+    client.get("/wizard/discovery")
+
+    non_list_response = client.post("/api/discovery/update", json={
+        "primary_theme_ids": "food_drink",
+        "secondary_theme_ids": [],
+    })
+    non_string_response = client.post("/api/discovery/update", json={
+        "primary_theme_ids": ["food_drink", 123],
+        "secondary_theme_ids": [],
+    })
+
+    assert non_list_response.status_code == 400
+    assert non_string_response.status_code == 400
+
+
 def test_photo_serving_by_event_and_index(tmp_path):
     session = create_session("test-trip", base_dir=tmp_path)
     from post_trip_summary.server.app import create_app
@@ -356,6 +404,29 @@ def test_skeleton_rename(tmp_path):
     assert response.json()["new_name"] == "Renamed"
 
 
+def test_skeleton_rename_in_discovered_stage_persists_to_reviewed_trip_file(tmp_path):
+    session = create_session("test-trip", base_dir=tmp_path)
+    session.current_stage = "discovered"
+    trip = _make_test_trip(tmp_path)
+    save_trip(trip, session.stage_file("reviewed"))
+    session.save()
+    from post_trip_summary.server.app import create_app, _build_event_index
+
+    app = create_app(session)
+    app.state.trip = trip
+    app.state.event_index = _build_event_index(app.state.trip)
+    client = TestClient(app)
+
+    response = client.post("/api/skeleton/rename", json={
+        "event_id": "day01-event01",
+        "new_name": "Discovery Edit",
+    })
+
+    assert response.status_code == 200
+    saved_trip = load_trip(session.stage_file("reviewed"))
+    assert saved_trip.days[0].events[0].name == "Discovery Edit"
+
+
 def test_review_page_renders_with_trip(tmp_path):
     session = create_session("test-trip", base_dir=tmp_path)
     session.current_stage = "ingested"
@@ -386,7 +457,7 @@ def test_advance_stage(tmp_path):
     assert response.json()["stage"] == "reviewed"
 
 
-def test_advance_stage_from_reviewed_returns_discovered_and_enrich_next_step(tmp_path):
+def test_advance_stage_from_reviewed_returns_discovery_without_advancing(tmp_path):
     session = create_session("test-trip", base_dir=tmp_path)
     session.current_stage = "reviewed"
     session.save()
@@ -400,7 +471,25 @@ def test_advance_stage_from_reviewed_returns_discovered_and_enrich_next_step(tmp
     response = client.post("/api/stage/advance")
 
     assert response.status_code == 200
-    assert response.json() == {"stage": "discovered", "next_step": "enrich"}
+    assert response.json() == {"stage": "reviewed", "next_step": "discovery"}
+    assert session.current_stage == "reviewed"
+
+
+def test_advance_stage_from_discovered_advances_to_enriched(tmp_path):
+    session = create_session("test-trip", base_dir=tmp_path)
+    session.current_stage = "discovered"
+    session.save()
+    from post_trip_summary.server.app import create_app
+    app = create_app(session)
+    app.state.trip = _make_test_trip(tmp_path)
+    from post_trip_summary.server.app import _build_event_index
+    app.state.event_index = _build_event_index(app.state.trip)
+    client = TestClient(app)
+
+    response = client.post("/api/stage/advance")
+
+    assert response.status_code == 200
+    assert response.json() == {"stage": "enriched", "next_step": "highlights"}
 
 
 def test_enrich_estimate_endpoint(tmp_path):
