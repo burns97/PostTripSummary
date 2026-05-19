@@ -94,7 +94,7 @@ def test_run_discovery_saves_artifact_returns_loaded_blend_and_advances_reviewed
     detected = {score.theme_id for score in blend.primary + blend.secondary}
     assert artifact_path.exists()
     assert loaded_blend == blend
-    assert {"culture_sightseeing", "food_drink"} <= detected
+    assert "culture_sightseeing" in detected
     assert session.current_stage == "discovered"
     assert load_session("paris-2026", base_dir=tmp_path).current_stage == "discovered"
 

@@ -24,6 +24,7 @@ def _event(
     event_type: str = "activity",
     photo_count: int = 3,
     description: str = "",
+    address: str | None = None,
 ) -> Event:
     day_offset = int(event_id.split("-")[-1]) if "-" in event_id else 0
     start = datetime(2026, 1, 1, hour, 0) + timedelta(days=day_offset)
@@ -36,7 +37,7 @@ def _event(
             lat=lat,
             lon=lon,
             name=name,
-            address=f"{name}, {city}",
+            address=address if address is not None else f"{name}, {city}",
             city=city,
             country=country,
         ),
@@ -232,3 +233,153 @@ def test_diagnostics_include_counts_and_raw_theme_scores():
         "wellness_slow",
         "nature_wildlife",
     }
+
+
+def test_long_haul_flight_jumps_are_excluded_from_destination_movement():
+    trip = _trip(
+        [
+            [
+                _event("haul-0", "Columbus airport departure", "Columbus", "United States", 39.99, -82.89, event_type="transit"),
+                _event("haul-1", "Dallas airport layover", "Dallas", "United States", 32.90, -97.04, event_type="transit"),
+            ],
+            [
+                _event("haul-2", "Auckland airport arrival", "Auckland", "New Zealand", -36.85, 174.76, event_type="transit"),
+            ],
+            [
+                _event("haul-3", "Scenic drive to Rotorua lookout", "Rotorua", "New Zealand", -38.14, 176.25),
+            ],
+            [
+                _event("haul-4", "Lake Taupo viewpoint", "Taupo", "New Zealand", -38.69, 176.07),
+            ],
+            [
+                _event("haul-5", "Glacier hiking trail", "Wanaka", "New Zealand", -44.70, 169.13),
+            ],
+        ]
+    )
+
+    blend = discover_vacation_blend(trip)
+
+    assert blend.diagnostics["gps_distance_km"] > 10000
+    assert blend.diagnostics["long_haul_segment_count"] >= 1
+    assert blend.diagnostics["long_haul_transit_km"] > 9000
+    assert blend.diagnostics["destination_movement_km"] < blend.diagnostics["gps_distance_km"]
+    assert "road_trip" in _primary_ids(blend)
+    road_trip = next(score for score in blend.primary if score.theme_id == "road_trip")
+    assert any("destination movement" in item.lower() for item in road_trip.evidence)
+
+
+def test_ordinary_lodging_and_restaurants_do_not_become_primary_themes():
+    trip = _trip(
+        [
+            [
+                _event("logistics-0", "Check in: Airport Hotel", "Auckland", "New Zealand", -36.85, 174.76, event_type="hotel"),
+                _event("logistics-1", "Casual restaurant lunch", "Auckland", "New Zealand", -36.85, 174.76, event_type="restaurant"),
+                _event("logistics-2", "Neighborhood restaurant dinner", "Auckland", "New Zealand", -36.85, 174.76, event_type="restaurant"),
+            ],
+            [
+                _event("logistics-3", "Check out: Airport Hotel", "Auckland", "New Zealand", -36.85, 174.76, event_type="hotel"),
+                _event("logistics-4", "Cafe breakfast", "Auckland", "New Zealand", -36.85, 174.76, event_type="restaurant"),
+                _event("logistics-5", "Waterfront museum visit", "Auckland", "New Zealand", -36.85, 174.76, event_type="landmark"),
+            ],
+        ]
+    )
+
+    blend = discover_vacation_blend(trip)
+
+    assert "resort_luxury" not in _primary_ids(blend)
+    assert "food_drink" not in _primary_ids(blend)
+
+
+def test_address_road_and_street_words_do_not_create_theme_matches():
+    trip = _trip(
+        [
+            [
+                _event(
+                    "address-0",
+                    "Check in: Rotorua Airbnb",
+                    "Rotorua",
+                    "New Zealand",
+                    -38.14,
+                    176.25,
+                    event_type="hotel",
+                    address="12 Lake Road",
+                ),
+                _event(
+                    "address-1",
+                    "Check out: Rotorua Airbnb",
+                    "Rotorua",
+                    "New Zealand",
+                    -38.14,
+                    176.25,
+                    event_type="hotel",
+                    address="12 Lake Road",
+                ),
+                _event(
+                    "address-2",
+                    "Check in: Wanaka Airbnb",
+                    "Wanaka",
+                    "New Zealand",
+                    -44.70,
+                    169.13,
+                    event_type="hotel",
+                    address="44 Main Street",
+                ),
+                _event(
+                    "address-3",
+                    "Check out: Wanaka Airbnb",
+                    "Wanaka",
+                    "New Zealand",
+                    -44.70,
+                    169.13,
+                    event_type="hotel",
+                    address="44 Main Street",
+                ),
+            ],
+        ]
+    )
+
+    blend = discover_vacation_blend(trip)
+
+    assert "road_trip" not in _primary_ids(blend)
+    assert "shopping_city" not in _detected_ids(blend)
+
+
+def test_natural_landmarks_do_not_make_culture_primary_by_event_type_alone():
+    trip = _trip(
+        [
+            [
+                _event("nature-landmark-0", "Waimangu volcanic valley lake", "Rotorua", "New Zealand", -38.28, 176.38, event_type="landmark"),
+                _event("nature-landmark-1", "Glacier lake viewpoint", "Wanaka", "New Zealand", -44.70, 169.13, event_type="landmark"),
+            ],
+            [
+                _event("nature-landmark-2", "Fjord waterfall lookout", "Te Anau", "New Zealand", -45.41, 167.72, event_type="landmark"),
+                _event("nature-landmark-3", "Mountain forest walk", "Queenstown", "New Zealand", -45.03, 168.66, event_type="landmark"),
+            ],
+        ]
+    )
+
+    blend = discover_vacation_blend(trip)
+
+    assert "nature_wildlife" in _detected_ids(blend)
+    assert "culture_sightseeing" not in _primary_ids(blend)
+
+
+def test_partial_trip_sample_adds_coverage_diagnostics_and_warning():
+    start = date(2026, 1, 1)
+    trip = Trip(
+        name="Partial Trip",
+        date_range=(start, start + timedelta(days=16)),
+        days=[
+            Day(date=start, events=[_event("partial-0", "Museum restaurant", "Auckland", "New Zealand", -36.85, 174.76, event_type="restaurant")]),
+            Day(date=start + timedelta(days=1), events=[_event("partial-1", "Hotel breakfast", "Auckland", "New Zealand", -36.85, 174.76, event_type="hotel")]),
+            Day(date=start + timedelta(days=2), events=[_event("partial-2", "City gallery walk", "Auckland", "New Zealand", -36.85, 174.76, event_type="landmark")]),
+        ],
+    )
+
+    blend = discover_vacation_blend(trip)
+
+    coverage = blend.diagnostics["coverage"]
+    assert coverage["expected_days"] == 17
+    assert coverage["observed_days"] == 3
+    assert coverage["coverage_confidence"] == "low"
+    assert any("partial trip sample" in warning for warning in blend.warnings)
