@@ -90,8 +90,11 @@ post-trip-summary add-input iceland-2025 \
   --apple-health ~/Downloads/export.xml \
   --dayone ~/Downloads/DayOne.json
 
-# Run the pipeline (ingest → skeleton → review → enrich → review)
+# Run the pipeline (ingest → skeleton → review → discovery → enrich → review)
 post-trip-summary resume iceland-2025
+
+# Optional: manually run Vacation Blend discovery after timeline review
+post-trip-summary discover iceland-2025
 
 # Preview in browser
 post-trip-summary preview iceland-2025
@@ -110,6 +113,7 @@ The pipeline runs in stages, saving progress after each step so you can resume a
 | **Skeleton** | Clusters events by time and location into a day-by-day trip structure, reverse geocodes centroids via Nominatim |
 | **Review skeleton** | Review and edit events in browser or CLI — merge, rename, delete, change type, add notes (browser UI opens by default) |
 | **Cull photos** | Optional browser-based photo review to remove unwanted shots before enrichment |
+| **Discovery** | Detects the Vacation Blend themes, such as Road Trip, Adventure, Food & Drink, or Beach & Relaxation, and lets you review/edit them before enrichment |
 | **Enrich** | Uses AI vision (Gemini or Claude) to describe photos and identify landmarks (with cost estimation and approval) |
 | **Pick highlights** | Optional browser-based selection of highlight photos for summary outputs |
 | **Review details** | Final interactive review of descriptions and details |
@@ -135,6 +139,7 @@ Several pipeline stages offer browser-based UIs (powered by FastAPI + Jinja2) as
 
 - **Skeleton review** (`/review/skeleton`) — Visual event editor with photo thumbnails. Checkbox-select events to merge, click names to rename inline, delete events, change types, and add notes.
 - **Photo cull** (`/review/cull`) — Toggle keep/remove on individual photos with quality score badges. Bulk actions per event.
+- **Discovery** — Wizard step after timeline review where detected Vacation Blend themes can be accepted or edited before enrichment.
 - **Highlight picker** (`/review/highlights`) — Select highlight photos for summary outputs.
 
 These can also be launched standalone:
@@ -170,6 +175,7 @@ post-trip-summary list                    List all sessions
 post-trip-summary add-input <slug> ...    Add data sources to a session
 post-trip-summary resume <slug>           Resume pipeline from last stage
 post-trip-summary resume <slug> --from <stage>  Restart from a specific stage
+post-trip-summary discover <slug>         Run Vacation Blend discovery after timeline review
 post-trip-summary preview <slug>          Preview trip in browser (FastAPI)
 post-trip-summary generate <slug>         Generate final output files
 post-trip-summary config                  View/edit global settings
@@ -188,6 +194,7 @@ src/post_trip_summary/
 ├── settings.py             # Global settings (vision provider, API keys)
 ├── models.py               # Core data models (Trip, Day, Event, Photo, etc.)
 ├── serialization.py        # JSON serialization/deserialization
+├── discovery/              # Vacation Blend discovery models, metadata scoring, and service
 ├── geo/
 │   ├── clustering.py       # Photo clustering by time gap + GPS distance
 │   ├── interpolate.py      # GPS interpolation for photos missing coordinates
