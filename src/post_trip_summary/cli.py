@@ -315,6 +315,49 @@ def preview(slug: str, port: int, base_dir: Path | None):
 @cli.command()
 @click.argument("slug")
 @click.option("--base-dir", type=click.Path(path_type=Path), default=None, hidden=True)
+def discover(slug: str, base_dir: Path | None):
+    """Run Vacation Blend discovery for reviewed trip data."""
+    base = base_dir or DEFAULT_BASE_DIR
+    session = load_session(slug, base_dir=base)
+    reviewed_file = session.stage_file("reviewed")
+    if not reviewed_file.exists():
+        click.echo("No reviewed trip data. Complete timeline review first.")
+        raise SystemExit(1)
+
+    from post_trip_summary.discovery.serialization import vacation_blend_path
+    from post_trip_summary.discovery.service import run_discovery_for_session
+    from post_trip_summary.discovery.taxonomy import get_theme_label
+
+    blend = run_discovery_for_session(session)
+    artifact_path = vacation_blend_path(session.session_dir)
+
+    def _theme_labels(scores):
+        return [score.label or get_theme_label(score.theme_id) for score in scores]
+
+    click.echo("Vacation Blend")
+    click.echo(f"Analysis mode: {blend.analysis_mode}")
+    click.echo(f"Confidence: {blend.confidence}")
+    primary_labels = _theme_labels(blend.primary)
+    if primary_labels:
+        click.echo(f"Primary themes: {', '.join(primary_labels)}")
+    else:
+        click.echo("Primary themes: none detected")
+
+    secondary_labels = _theme_labels(blend.secondary)
+    if secondary_labels:
+        click.echo(f"Secondary themes: {', '.join(secondary_labels)}")
+
+    if blend.warnings:
+        click.echo("Warnings:")
+        for warning in blend.warnings:
+            click.echo(f"  - {warning}")
+
+    click.echo(f"Saved artifact: {artifact_path}")
+
+
+@cli.command()
+@click.argument("slug")
+@click.option("--base-dir", type=click.Path(path_type=Path), default=None, hidden=True)
 def generate(slug: str, base_dir: Path | None):
     """Generate final output files."""
     base = base_dir or DEFAULT_BASE_DIR

@@ -4,7 +4,7 @@ from unittest.mock import patch
 
 from click.testing import CliRunner
 from post_trip_summary.cli import cli
-from post_trip_summary.config import create_session
+from post_trip_summary.config import create_session, load_session
 from post_trip_summary.models import Day, Event, Location, Photo, Trip
 from post_trip_summary.serialization import save_trip
 
@@ -73,3 +73,31 @@ def test_generate_command_creates_trip_story(tmp_path):
     assert result.exit_code == 0
     story.assert_called_once()
     assert "Generating trip story" in result.output
+
+
+def test_discover_command_creates_vacation_blend(tmp_path):
+    runner = CliRunner()
+    session = create_session("Paris 2026", base_dir=tmp_path)
+    session.current_stage = "reviewed"
+    session.save()
+    save_trip(_final_trip(tmp_path), session.stage_file("reviewed"))
+
+    result = runner.invoke(cli, ["discover", "paris-2026", "--base-dir", str(tmp_path)])
+
+    assert result.exit_code == 0
+    assert "Vacation Blend" in result.output
+    assert "Analysis mode: metadata_only" in result.output
+    assert (session.session_dir / "vacation_blend.json").exists()
+    assert load_session("paris-2026", base_dir=tmp_path).current_stage == "discovered"
+
+
+def test_discover_command_requires_reviewed_data(tmp_path):
+    runner = CliRunner()
+    session = create_session("Paris 2026", base_dir=tmp_path)
+    session.current_stage = "reviewed"
+    session.save()
+
+    result = runner.invoke(cli, ["discover", "paris-2026", "--base-dir", str(tmp_path)])
+
+    assert result.exit_code != 0
+    assert "No reviewed trip data" in result.output
