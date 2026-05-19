@@ -6,7 +6,12 @@ from fastapi.testclient import TestClient
 from PIL import Image
 
 from post_trip_summary.config import create_session
-from post_trip_summary.discovery.serialization import load_vacation_blend, vacation_blend_path
+from post_trip_summary.discovery.models import ThemeScore, VacationBlend
+from post_trip_summary.discovery.serialization import (
+    load_vacation_blend,
+    save_vacation_blend,
+    vacation_blend_path,
+)
 from post_trip_summary.models import Day, Event, Location, Photo, Trip
 from post_trip_summary.serialization import load_trip, save_trip
 
@@ -143,6 +148,29 @@ def _make_discovery_trip(tmp_path):
         name="Discovery Test",
         date_range=(date(2026, 3, 5), date(2026, 3, 5)),
         days=[Day(date=date(2026, 3, 5), events=[event])],
+    )
+
+
+def _save_test_vacation_blend(session):
+    save_vacation_blend(
+        vacation_blend_path(session.session_dir),
+        VacationBlend(
+            analysis_mode="metadata",
+            confidence="high",
+            primary=[
+                ThemeScore(
+                    theme_id="culture_sightseeing",
+                    label="Culture & sightseeing",
+                    score=5.0,
+                    evidence=[],
+                    sample_event_ids=[],
+                )
+            ],
+            secondary=[],
+            rejected=[],
+            diagnostics={},
+            warnings=[],
+        ),
     )
 
 
@@ -409,6 +437,7 @@ def test_skeleton_rename_in_discovered_stage_persists_to_reviewed_trip_file(tmp_
     session.current_stage = "discovered"
     trip = _make_test_trip(tmp_path)
     save_trip(trip, session.stage_file("reviewed"))
+    _save_test_vacation_blend(session)
     session.save()
     from post_trip_summary.server.app import create_app, _build_event_index
 
@@ -425,6 +454,8 @@ def test_skeleton_rename_in_discovered_stage_persists_to_reviewed_trip_file(tmp_
     assert response.status_code == 200
     saved_trip = load_trip(session.stage_file("reviewed"))
     assert saved_trip.days[0].events[0].name == "Discovery Edit"
+    assert not vacation_blend_path(session.session_dir).exists()
+    assert session.current_stage == "reviewed"
 
 
 def test_review_page_renders_with_trip(tmp_path):
@@ -475,7 +506,7 @@ def test_advance_stage_from_reviewed_returns_discovery_without_advancing(tmp_pat
     assert session.current_stage == "reviewed"
 
 
-def test_advance_stage_from_discovered_advances_to_enriched(tmp_path):
+def test_advance_stage_from_discovered_returns_enrich_without_advancing(tmp_path):
     session = create_session("test-trip", base_dir=tmp_path)
     session.current_stage = "discovered"
     session.save()
@@ -489,7 +520,65 @@ def test_advance_stage_from_discovered_advances_to_enriched(tmp_path):
     response = client.post("/api/stage/advance")
 
     assert response.status_code == 200
-    assert response.json() == {"stage": "enriched", "next_step": "highlights"}
+    assert response.json() == {"stage": "discovered", "next_step": "enrich"}
+    assert session.current_stage == "discovered"
+    assert not session.stage_file("enriched").exists()
+
+
+def test_start_enrich_from_reviewed_requires_completed_discovery(tmp_path):
+    session = create_session("test-trip", base_dir=tmp_path)
+    session.current_stage = "reviewed"
+    session.save()
+    from post_trip_summary.server.app import create_app, _build_event_index
+
+    app = create_app(session)
+    app.state.trip = _make_test_trip(tmp_path)
+    app.state.event_index = _build_event_index(app.state.trip)
+    client = TestClient(app)
+
+    response = client.post("/api/stage/start", json={"stage": "enrich", "mode": "quick"})
+
+    assert response.status_code == 409
+    assert "Discovery must be completed first" in response.text
+    assert app.state.background_task is None
+
+
+def test_start_enrich_from_discovered_requires_vacation_blend_artifact(tmp_path):
+    session = create_session("test-trip", base_dir=tmp_path)
+    session.current_stage = "discovered"
+    session.save()
+    from post_trip_summary.server.app import create_app, _build_event_index
+
+    app = create_app(session)
+    app.state.trip = _make_test_trip(tmp_path)
+    app.state.event_index = _build_event_index(app.state.trip)
+    client = TestClient(app)
+
+    response = client.post("/api/stage/start", json={"stage": "enrich", "mode": "quick"})
+
+    assert response.status_code == 409
+    assert "Discovery must be completed first" in response.text
+    assert app.state.background_task is None
+
+
+def test_start_enrich_from_discovered_with_vacation_blend_starts(tmp_path):
+    session = create_session("test-trip", base_dir=tmp_path)
+    session.current_stage = "discovered"
+    _save_test_vacation_blend(session)
+    session.save()
+    from post_trip_summary.server.app import create_app, _build_event_index
+
+    app = create_app(session)
+    app.state.trip = _make_test_trip(tmp_path)
+    app.state.event_index = _build_event_index(app.state.trip)
+    client = TestClient(app)
+
+    with patch("post_trip_summary.server.compute.run_enrich_pipeline") as mock_run:
+        mock_run.return_value = app.state.trip
+        response = client.post("/api/stage/start", json={"stage": "enrich", "mode": "quick"})
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "started"
 
 
 def test_enrich_estimate_endpoint(tmp_path):

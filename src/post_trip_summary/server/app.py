@@ -298,6 +298,15 @@ def create_app(session: SessionConfig) -> FastAPI:
             return JSONResponse({"status": "started"})
 
         elif stage == "enrich":
+            from post_trip_summary.discovery.serialization import vacation_blend_path
+
+            artifact_path = vacation_blend_path(app.state.session.session_dir)
+            if (
+                app.state.session.current_stage != "discovered"
+                or not artifact_path.exists()
+            ):
+                raise HTTPException(409, "Discovery must be completed first")
+
             mode = body.get("mode", "quick")
             tracker = ProgressTracker()
             app.state.progress = tracker
@@ -397,6 +406,20 @@ def create_app(session: SessionConfig) -> FastAPI:
             _save(app.state.trip, app.state.session.stage_file(target))
         except ValueError:
             pass  # Stages like "new" or "setup" have no file
+        _invalidate_discovery_if_needed(stage)
+
+    def _invalidate_discovery_if_needed(saved_stage: str):
+        """Reset stale discovery output after timeline edits in discovered state."""
+        if saved_stage != "discovered":
+            return
+
+        from post_trip_summary.discovery.serialization import vacation_blend_path
+
+        artifact_path = vacation_blend_path(app.state.session.session_dir)
+        if artifact_path.exists():
+            artifact_path.unlink()
+        app.state.session.current_stage = "reviewed"
+        app.state.session.save()
 
     def _on_highlights_changed():
         """Save trip and reset stage if highlights changed after synthesis."""
@@ -605,7 +628,7 @@ def create_app(session: SessionConfig) -> FastAPI:
     @app.post("/api/stage/advance")
     async def advance_stage(request: Request):
         current = app.state.session.current_stage
-        if current == "reviewed":
+        if current in ("reviewed", "discovered"):
             return JSONResponse({"stage": current, "next_step": STAGE_TO_STEP[current]})
         idx = STAGES.index(current)
         if idx + 1 < len(STAGES):
