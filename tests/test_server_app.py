@@ -206,6 +206,7 @@ def test_discovery_page_renders_writes_artifact_and_keeps_reviewed_stage(tmp_pat
     assert "Trip Discovery" in response.text
     assert "Food &amp; drink" in response.text or "Food & drink" in response.text
     assert vacation_blend_path(session.session_dir).exists()
+    assert (session.session_dir / "vacation_blend_debug.md").exists()
     assert session.current_stage == "reviewed"
 
 
@@ -232,6 +233,10 @@ def test_discovery_update_saves_themes_advances_and_returns_enrich(tmp_path):
     blend = load_vacation_blend(vacation_blend_path(session.session_dir))
     assert [theme.theme_id for theme in blend.primary] == ["culture_sightseeing"]
     assert [theme.theme_id for theme in blend.secondary] == ["food_drink", "shopping_city"]
+    report = (session.session_dir / "vacation_blend_debug.md").read_text(encoding="utf-8")
+    assert "Culture & sightseeing" in report
+    assert "Food & drink" in report
+    assert "Shopping & city life" in report
 
 
 def test_discovery_update_rejects_unknown_theme_ids(tmp_path):

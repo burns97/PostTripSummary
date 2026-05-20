@@ -328,12 +328,14 @@ def discover(slug: str, base_dir: Path | None):
         click.echo("No reviewed trip data. Complete timeline review first.")
         raise SystemExit(1)
 
+    from post_trip_summary.discovery.debug_report import vacation_blend_debug_report_path
     from post_trip_summary.discovery.serialization import vacation_blend_path
     from post_trip_summary.discovery.service import run_discovery_for_session
     from post_trip_summary.discovery.taxonomy import get_theme_label
 
     blend = run_discovery_for_session(session)
     artifact_path = vacation_blend_path(session.session_dir)
+    debug_report_path = vacation_blend_debug_report_path(session.session_dir)
 
     def _theme_labels(scores):
         return [score.label or get_theme_label(score.theme_id) for score in scores]
@@ -357,6 +359,7 @@ def discover(slug: str, base_dir: Path | None):
             click.echo(f"  - {warning}")
 
     click.echo(f"Saved artifact: {artifact_path}")
+    click.echo(f"Debug report: {debug_report_path}")
 
 
 @cli.command()

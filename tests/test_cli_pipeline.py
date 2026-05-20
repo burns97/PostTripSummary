@@ -89,7 +89,9 @@ def test_discover_command_creates_vacation_blend(tmp_path):
     assert "Analysis mode: metadata_only" in result.output
     assert "Primary themes:" in result.output
     assert "Saved artifact:" in result.output
+    assert "Debug report:" in result.output
     assert (session.session_dir / "vacation_blend.json").exists()
+    assert (session.session_dir / "vacation_blend_debug.md").exists()
     assert load_session("paris-2026", base_dir=tmp_path).current_stage == "discovered"
 
 

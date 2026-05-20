@@ -413,11 +413,15 @@ def create_app(session: SessionConfig) -> FastAPI:
         if saved_stage != "discovered":
             return
 
+        from post_trip_summary.discovery.debug_report import vacation_blend_debug_report_path
         from post_trip_summary.discovery.serialization import vacation_blend_path
 
         artifact_path = vacation_blend_path(app.state.session.session_dir)
         if artifact_path.exists():
             artifact_path.unlink()
+        debug_report_path = vacation_blend_debug_report_path(app.state.session.session_dir)
+        if debug_report_path.exists():
+            debug_report_path.unlink()
         app.state.session.current_stage = "reviewed"
         app.state.session.save()
 
@@ -662,6 +666,10 @@ def create_app(session: SessionConfig) -> FastAPI:
         if app.state.trip is None:
             return RedirectResponse("/wizard/setup", status_code=307)
 
+        from post_trip_summary.discovery.debug_report import (
+            save_vacation_blend_debug_report,
+            vacation_blend_debug_report_path,
+        )
         from post_trip_summary.discovery.serialization import (
             load_vacation_blend,
             vacation_blend_path,
@@ -670,8 +678,11 @@ def create_app(session: SessionConfig) -> FastAPI:
         from post_trip_summary.discovery.taxonomy import VACATION_THEMES
 
         artifact_path = vacation_blend_path(app.state.session.session_dir)
+        debug_report_path = vacation_blend_debug_report_path(app.state.session.session_dir)
         if artifact_path.exists():
             blend = load_vacation_blend(artifact_path)
+            if not debug_report_path.exists():
+                save_vacation_blend_debug_report(debug_report_path, blend)
         else:
             blend = run_discovery_for_session(app.state.session, advance_stage=False)
 
@@ -688,6 +699,10 @@ def create_app(session: SessionConfig) -> FastAPI:
 
     @app.post("/api/discovery/update")
     async def discovery_update(request: Request):
+        from post_trip_summary.discovery.debug_report import (
+            save_vacation_blend_debug_report,
+            vacation_blend_debug_report_path,
+        )
         from post_trip_summary.discovery.models import ThemeScore
         from post_trip_summary.discovery.serialization import (
             load_vacation_blend,
@@ -757,6 +772,10 @@ def create_app(session: SessionConfig) -> FastAPI:
         blend.secondary = [_score_for(theme_id) for theme_id in secondary_ids]
         blend.rejected = sorted(rejected)
         save_vacation_blend(artifact_path, blend)
+        save_vacation_blend_debug_report(
+            vacation_blend_debug_report_path(app.state.session.session_dir),
+            blend,
+        )
 
         if app.state.session.current_stage == "reviewed":
             app.state.session.current_stage = "discovered"

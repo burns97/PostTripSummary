@@ -99,6 +99,24 @@ def test_run_discovery_saves_artifact_returns_loaded_blend_and_advances_reviewed
     assert load_session("paris-2026", base_dir=tmp_path).current_stage == "discovered"
 
 
+def test_run_discovery_saves_debug_report_with_scores_and_diagnostics(tmp_path):
+    session = create_session("Paris 2026", base_dir=tmp_path)
+    session.current_stage = "reviewed"
+    session.save()
+    save_trip(_reviewed_trip(), session.stage_file("reviewed"))
+
+    run_discovery_for_session(session)
+
+    report_path = session.session_dir / "vacation_blend_debug.md"
+    assert report_path.exists()
+    report = report_path.read_text(encoding="utf-8")
+    assert "# Vacation Blend Debug Report" in report
+    assert "Culture & sightseeing" in report
+    assert "Theme Scores" in report
+    assert "Diagnostics" in report
+    assert "event_count" in report
+
+
 def test_run_discovery_with_advance_stage_false_leaves_reviewed_session(tmp_path):
     session = create_session("Paris 2026", base_dir=tmp_path)
     session.current_stage = "reviewed"
