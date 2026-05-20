@@ -6,11 +6,12 @@ from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse, Response
-from jinja2 import Environment, PackageLoader
+from jinja2 import Environment, PackageLoader, select_autoescape
 
 from post_trip_summary.models import Trip
 from post_trip_summary.output.shareable_pdf import select_highlights, compute_stats
 from post_trip_summary.output.detailed_record import _format_time_filter, _photo_url_filter
+from post_trip_summary.output.trip_story import build_story_context
 from post_trip_summary.pipeline.review_skeleton import _TYPE_ICONS
 
 
@@ -75,7 +76,10 @@ def create_app(trip: Trip, save_fn=None) -> FastAPI:
         save_fn: Optional callable to persist trip changes (for review modes).
     """
     app = FastAPI(title="Post-Trip Summary Preview")
-    env = Environment(loader=PackageLoader("post_trip_summary", "templates"))
+    env = Environment(
+        loader=PackageLoader("post_trip_summary", "templates"),
+        autoescape=select_autoescape(["html", "xml"]),
+    )
     env.filters["ftime"] = _format_time_filter
     env.filters["photo_url"] = _photo_url_filter
 
@@ -97,6 +101,7 @@ def create_app(trip: Trip, save_fn=None) -> FastAPI:
             <li><a href="/detailed">Detailed Record</a></li>
             <li><a href="/summary">Shareable Summary</a></li>
             <li><a href="/blog">Blog Post</a></li>
+            <li><a href="/story">Trip Story</a></li>
         </ul>
         </body></html>"""
 
@@ -117,6 +122,11 @@ def create_app(trip: Trip, save_fn=None) -> FastAPI:
         template = env.get_template("blog_post.html")
         highlights = select_highlights(trip)
         return template.render(trip=trip, highlights=highlights)
+
+    @app.get("/story", response_class=HTMLResponse)
+    def story():
+        template = env.get_template("trip_story.html")
+        return template.render(**build_story_context(trip, map_image=None))
 
     # --- Photo serving ---
 

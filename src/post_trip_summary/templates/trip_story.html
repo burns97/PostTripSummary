@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ trip.name }} - Trip Story</title>
+    <style>
+        * { box-sizing: border-box; }
+        body {
+            margin: 0;
+            font-family: Georgia, "Times New Roman", serif;
+            color: #27231f;
+            background: #f7f1e8;
+            line-height: 1.65;
+        }
+        img { max-width: 100%; display: block; }
+        .story-hero {
+            min-height: 72vh;
+            display: flex;
+            align-items: flex-end;
+            position: relative;
+            overflow: hidden;
+            color: #fff;
+            background: #2c3531;
+        }
+        .hero-cover {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            max-width: none;
+            object-fit: cover;
+        }
+        .story-hero::before {
+            content: "";
+            position: absolute;
+            inset: 0;
+            background: linear-gradient(180deg, rgba(0,0,0,0.16), rgba(0,0,0,0.68));
+            z-index: 1;
+        }
+        .hero-inner {
+            position: relative;
+            z-index: 2;
+            width: min(1100px, 100%);
+            margin: 0 auto;
+            padding: 4rem 2rem;
+        }
+        .kicker {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            text-transform: uppercase;
+            letter-spacing: 0.12em;
+            font-size: 0.75rem;
+            font-weight: 700;
+            color: #f4d7a1;
+        }
+        h1 {
+            margin: 0.2rem 0 0.5rem;
+            font-size: clamp(2.6rem, 8vw, 6.5rem);
+            line-height: 0.95;
+            letter-spacing: 0;
+        }
+        .subtitle {
+            max-width: 720px;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            font-size: clamp(1rem, 2.5vw, 1.35rem);
+            color: rgba(255,255,255,0.9);
+        }
+        .story-shell {
+            width: min(1040px, 100%);
+            margin: 0 auto;
+            padding: 3rem 1.25rem 4rem;
+        }
+        .intro-grid {
+            display: grid;
+            grid-template-columns: minmax(0, 1.4fr) minmax(220px, 0.6fr);
+            gap: 2rem;
+            align-items: start;
+            margin-bottom: 3rem;
+        }
+        .intro-card, .stats-card {
+            border-top: 1px solid #d8c5a7;
+            padding-top: 1.25rem;
+        }
+        .lede {
+            font-size: clamp(1.3rem, 3vw, 2rem);
+            line-height: 1.35;
+            margin: 0;
+        }
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 1rem;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        }
+        .stat-number {
+            display: block;
+            font-size: 1.7rem;
+            font-weight: 750;
+            color: #31584c;
+        }
+        .stat-label {
+            display: block;
+            color: #6f665c;
+            font-size: 0.78rem;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+        }
+        .route-map {
+            margin: 0 0 3rem;
+            border-radius: 8px;
+            overflow: hidden;
+            border: 1px solid #ddcfb8;
+        }
+        .highlight-reel {
+            display: grid;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: 0.5rem;
+            margin: 2rem 0 4rem;
+        }
+        .highlight-reel img {
+            width: 100%;
+            aspect-ratio: 1;
+            object-fit: cover;
+            border-radius: 6px;
+        }
+        .day-section {
+            margin: 0 0 4rem;
+        }
+        .day-header {
+            margin-bottom: 1.5rem;
+            border-bottom: 1px solid #d8c5a7;
+            padding-bottom: 0.75rem;
+        }
+        .day-header h2 {
+            margin: 0;
+            font-size: clamp(1.8rem, 4vw, 3rem);
+            line-height: 1.05;
+        }
+        .day-date {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            color: #756b5f;
+            font-size: 0.95rem;
+        }
+        .event-block {
+            margin: 0 0 2.5rem;
+        }
+        .event-meta {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            color: #756b5f;
+            font-size: 0.9rem;
+            margin-bottom: 0.35rem;
+        }
+        .event-block h3 {
+            margin: 0 0 0.55rem;
+            font-size: clamp(1.35rem, 3vw, 2rem);
+            line-height: 1.1;
+        }
+        .event-description {
+            max-width: 760px;
+            margin: 0 0 1rem;
+            font-size: 1.05rem;
+        }
+        .event-notes {
+            max-width: 720px;
+            margin: 1rem 0;
+            padding-left: 1rem;
+            border-left: 3px solid #c98255;
+            color: #5f554b;
+            font-style: italic;
+        }
+        .photo-grid {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 0.65rem;
+            margin-top: 1rem;
+        }
+        .photo-grid img {
+            width: 100%;
+            aspect-ratio: 4 / 3;
+            object-fit: cover;
+            border-radius: 6px;
+        }
+        .story-footer {
+            border-top: 1px solid #d8c5a7;
+            padding-top: 2rem;
+            color: #756b5f;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            font-size: 0.9rem;
+        }
+        @media (max-width: 760px) {
+            .intro-grid { grid-template-columns: 1fr; }
+            .highlight-reel { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+            .photo-grid { grid-template-columns: 1fr; }
+            .hero-inner { padding: 3rem 1.25rem; }
+        }
+    </style>
+</head>
+<body>
+    <header class="story-hero {% if cover_photo %}has-cover{% endif %}">
+        {% if cover_photo %}
+        <img class="hero-cover" src="{{ cover_photo.path | photo_url }}" alt="{{ cover_photo.ai_description or trip.name }}">
+        {% endif %}
+        <div class="hero-inner">
+            <div class="kicker">Trip Story</div>
+            <h1>{{ trip.name }}</h1>
+            <div class="subtitle">
+                {{ trip.date_range[0].strftime('%B %d') }} - {{ trip.date_range[1].strftime('%B %d, %Y') }}
+                {% if location_summary %}<br>{{ location_summary }}{% endif %}
+            </div>
+        </div>
+    </header>
+
+    <main class="story-shell">
+        <section class="intro-grid" aria-label="Trip overview">
+            <div class="intro-card">
+                <p class="lede">
+                    A photo-led record of {{ trip.name }}{% if location_summary %}, following the route through {{ location_summary }}{% endif %}.
+                </p>
+            </div>
+            <aside class="stats-card" aria-label="By the Numbers">
+                <div class="kicker">By the Numbers</div>
+                <div class="stats-grid">
+                    <div><span class="stat-number">{{ stats.days }}</span><span class="stat-label">Days</span></div>
+                    <div><span class="stat-number">{{ stats.stops }}</span><span class="stat-label">Stops</span></div>
+                    <div><span class="stat-number">{{ stats.photos }}</span><span class="stat-label">Photos</span></div>
+                    <div><span class="stat-number">{{ stats.highlights }}</span><span class="stat-label">Highlights</span></div>
+                </div>
+            </aside>
+        </section>
+
+        {% if map_image %}
+        <section class="route-map" aria-label="Trip route">
+            <img src="{{ map_image }}" alt="Trip route map">
+        </section>
+        {% endif %}
+
+        {% if highlight_photos %}
+        <section aria-label="Highlight photos">
+            <div class="kicker">Highlights</div>
+            <div class="highlight-reel">
+                {% for photo in highlight_photos %}
+                <img src="{{ photo.path | photo_url }}" alt="{{ photo.ai_description or trip.name }}">
+                {% endfor %}
+            </div>
+        </section>
+        {% endif %}
+
+        {% for day in story_days %}
+        <section class="day-section">
+            <header class="day-header">
+                <div class="day-date">{{ day.date.strftime('%A, %B %d') }}</div>
+                <h2>Day {{ loop.index }}</h2>
+            </header>
+
+            {% for event in day.events %}
+            {% set kept_photos = event.photos | selectattr('is_kept') | list %}
+            {% set event_highlights = kept_photos | selectattr('is_highlight') | list %}
+            {% if event.description or event.notes or kept_photos %}
+            <article class="event-block">
+                <div class="event-meta">
+                    {{ event.time_range[0] | ftime }}
+                    {% if event.location.name %} · {{ event.location.name }}{% endif %}
+                    {% if event.location.city %} · {{ event.location.city }}{% endif %}
+                </div>
+                <h3>{{ event.name }}</h3>
+                {% if event.description %}
+                <p class="event-description">{{ event.description }}</p>
+                {% endif %}
+                {% if event.notes %}
+                <blockquote class="event-notes">{{ event.notes }}</blockquote>
+                {% endif %}
+                {% if event_highlights %}
+                <div class="photo-grid">
+                    {% for photo in event_highlights[:6] %}
+                    <img src="{{ photo.path | photo_url }}" alt="{{ photo.ai_description or event.name }}">
+                    {% endfor %}
+                </div>
+                {% elif kept_photos %}
+                <div class="photo-grid">
+                    {% for photo in kept_photos[:3] %}
+                    <img src="{{ photo.path | photo_url }}" alt="{{ photo.ai_description or event.name }}">
+                    {% endfor %}
+                </div>
+                {% endif %}
+            </article>
+            {% endif %}
+            {% endfor %}
+        </section>
+        {% endfor %}
+
+        <footer class="story-footer">
+            Generated locally with Post-Trip Summary.
+        </footer>
+    </main>
+</body>
+</html>

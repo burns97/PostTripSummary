@@ -12,6 +12,8 @@ from PIL import Image
 
 from post_trip_summary.cli import cli
 from post_trip_summary.config import create_session, load_session
+from post_trip_summary.discovery.models import ThemeScore, VacationBlend
+from post_trip_summary.discovery.serialization import save_vacation_blend, vacation_blend_path
 from post_trip_summary.models import Day, Event, Location, Photo, Trip
 
 
@@ -133,6 +135,29 @@ def _make_test_trip(tmp_path):
     )
 
 
+def _save_test_vacation_blend(session):
+    save_vacation_blend(
+        vacation_blend_path(session.session_dir),
+        VacationBlend(
+            analysis_mode="metadata",
+            confidence="high",
+            primary=[
+                ThemeScore(
+                    theme_id="culture_sightseeing",
+                    label="Culture & sightseeing",
+                    score=5.0,
+                    evidence=[],
+                    sample_event_ids=[],
+                )
+            ],
+            secondary=[],
+            rejected=[],
+            diagnostics={},
+            warnings=[],
+        ),
+    )
+
+
 def test_review_flow(tmp_path):
     """Integration test: ingested stage -> review page -> edit -> advance to reviewed."""
     from post_trip_summary.server.app import create_app, _build_event_index
@@ -245,7 +270,8 @@ def test_enrich_quick_mode_passes_through(tmp_path):
     from post_trip_summary.server.app import create_app, _build_event_index
 
     session = create_session("enrich-mode-trip", base_dir=tmp_path)
-    session.current_stage = "reviewed"
+    session.current_stage = "discovered"
+    _save_test_vacation_blend(session)
     session.save()
 
     app = create_app(session)

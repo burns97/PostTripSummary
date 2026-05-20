@@ -1,5 +1,6 @@
 # src/post_trip_summary/config.py
 """Session configuration and management."""
+from copy import deepcopy
 import json
 import re
 import shutil
@@ -12,9 +13,33 @@ DEFAULT_SETTINGS = {
     "cluster_time_gap_minutes": 15,
     "cluster_distance_meters": 200,
     "quality_cull_percentile": 15,
+    "discovery": {
+        "mode": "metadata_only",
+        "enable_local_ai": False,
+        "local_provider_url": None,
+        "local_model": None,
+        "enable_cloud_synthesis": False,
+        "max_local_images": 150,
+        "max_cloud_images": 40,
+        "timeout_seconds": 30,
+    },
 }
 
-STAGES = ["new", "setup", "ingested", "reviewed", "enriched", "highlights_done", "generated"]
+STAGES = ["new", "setup", "ingested", "reviewed", "discovered", "enriched", "highlights_done", "generated"]
+
+
+def _merge_dicts(defaults: dict, overrides: dict) -> dict:
+    merged = deepcopy(defaults)
+    for key, value in overrides.items():
+        if isinstance(value, dict) and isinstance(merged.get(key), dict):
+            merged[key] = _merge_dicts(merged[key], value)
+        else:
+            merged[key] = deepcopy(value)
+    return merged
+
+
+def _merge_settings(settings: dict | None) -> dict:
+    return _merge_dicts(DEFAULT_SETTINGS, settings or {})
 
 
 def _slugify(name: str) -> str:
@@ -31,7 +56,7 @@ class SessionConfig:
     session_dir: Path
     current_stage: str = "new"
     inputs: dict = field(default_factory=dict)
-    settings: dict = field(default_factory=lambda: dict(DEFAULT_SETTINGS))
+    settings: dict = field(default_factory=lambda: _merge_settings(None))
 
     def save(self) -> None:
         self.session_dir.mkdir(parents=True, exist_ok=True)
@@ -86,7 +111,7 @@ def load_session(slug: str, base_dir: Path | None = None) -> SessionConfig:
         session_dir=base / slug,
         current_stage=data.get("current_stage", "new"),
         inputs=data.get("inputs", {}),
-        settings={**DEFAULT_SETTINGS, **data.get("settings", {})},
+        settings=_merge_settings(data.get("settings", {})),
     )
 
 

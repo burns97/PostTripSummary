@@ -66,18 +66,20 @@ STAGE_TO_STEP = {
     "new": "setup",
     "setup": "setup",
     "ingested": "review",
-    "reviewed": "enrich",
+    "reviewed": "discovery",
+    "discovered": "enrich",
     "enriched": "highlights",
     "highlights_done": "generate",
     "generated": "generate",
 }
 
-WIZARD_STEPS = ["setup", "ingest", "review", "enrich", "highlights", "generate"]
+WIZARD_STEPS = ["setup", "ingest", "review", "discovery", "enrich", "highlights", "generate"]
 
 STEP_COMPLETED_AT = {
     "setup": "ingested",
     "ingest": "ingested",
     "review": "reviewed",
+    "discovery": "discovered",
     "enrich": "enriched",
     "highlights": "highlights_done",
     "generate": "generated",
@@ -296,6 +298,15 @@ def create_app(session: SessionConfig) -> FastAPI:
             return JSONResponse({"status": "started"})
 
         elif stage == "enrich":
+            from post_trip_summary.discovery.serialization import vacation_blend_path
+
+            artifact_path = vacation_blend_path(app.state.session.session_dir)
+            if (
+                app.state.session.current_stage != "discovered"
+                or not artifact_path.exists()
+            ):
+                raise HTTPException(409, "Discovery must be completed first")
+
             mode = body.get("mode", "quick")
             tracker = ProgressTracker()
             app.state.progress = tracker
@@ -385,6 +396,7 @@ def create_app(session: SessionConfig) -> FastAPI:
         save_targets = {
             "ingested": "reviewed",
             "reviewed": "reviewed",
+            "discovered": "reviewed",
             "enriched": "enriched",
             "highlights_done": "highlights_done",
             "generated": "highlights_done",
@@ -394,6 +406,24 @@ def create_app(session: SessionConfig) -> FastAPI:
             _save(app.state.trip, app.state.session.stage_file(target))
         except ValueError:
             pass  # Stages like "new" or "setup" have no file
+        _invalidate_discovery_if_needed(stage)
+
+    def _invalidate_discovery_if_needed(saved_stage: str):
+        """Reset stale discovery output after timeline edits in discovered state."""
+        if saved_stage != "discovered":
+            return
+
+        from post_trip_summary.discovery.debug_report import vacation_blend_debug_report_path
+        from post_trip_summary.discovery.serialization import vacation_blend_path
+
+        artifact_path = vacation_blend_path(app.state.session.session_dir)
+        if artifact_path.exists():
+            artifact_path.unlink()
+        debug_report_path = vacation_blend_debug_report_path(app.state.session.session_dir)
+        if debug_report_path.exists():
+            debug_report_path.unlink()
+        app.state.session.current_stage = "reviewed"
+        app.state.session.save()
 
     def _on_highlights_changed():
         """Save trip and reset stage if highlights changed after synthesis."""
@@ -602,6 +632,8 @@ def create_app(session: SessionConfig) -> FastAPI:
     @app.post("/api/stage/advance")
     async def advance_stage(request: Request):
         current = app.state.session.current_stage
+        if current in ("reviewed", "discovered"):
+            return JSONResponse({"stage": current, "next_step": STAGE_TO_STEP[current]})
         idx = STAGES.index(current)
         if idx + 1 < len(STAGES):
             app.state.session.current_stage = STAGES[idx + 1]
@@ -629,12 +661,141 @@ def create_app(session: SessionConfig) -> FastAPI:
         template = env.get_template("review.html")
         return HTMLResponse(template.render(**ctx))
 
+    @app.get("/wizard/discovery", response_class=HTMLResponse)
+    def wizard_discovery():
+        if app.state.trip is None:
+            return RedirectResponse("/wizard/setup", status_code=307)
+
+        from post_trip_summary.discovery.debug_report import (
+            save_vacation_blend_debug_report,
+            vacation_blend_debug_report_path,
+        )
+        from post_trip_summary.discovery.serialization import (
+            load_vacation_blend,
+            vacation_blend_path,
+        )
+        from post_trip_summary.discovery.service import run_discovery_for_session
+        from post_trip_summary.discovery.taxonomy import VACATION_THEMES
+
+        artifact_path = vacation_blend_path(app.state.session.session_dir)
+        debug_report_path = vacation_blend_debug_report_path(app.state.session.session_dir)
+        if artifact_path.exists():
+            blend = load_vacation_blend(artifact_path)
+            if not debug_report_path.exists():
+                save_vacation_blend_debug_report(debug_report_path, blend)
+        else:
+            blend = run_discovery_for_session(app.state.session, advance_stage=False)
+
+        ctx = _get_wizard_context(app.state.session)
+        ctx["blend"] = blend
+        ctx["themes"] = VACATION_THEMES
+        ctx["theme_labels"] = {theme.id: theme.label for theme in VACATION_THEMES}
+        ctx["theme_options"] = [
+            {"id": theme.id, "label": theme.label, "description": theme.description}
+            for theme in VACATION_THEMES
+        ]
+        template = env.get_template("discovery.html")
+        return HTMLResponse(template.render(**ctx))
+
+    @app.post("/api/discovery/update")
+    async def discovery_update(request: Request):
+        from post_trip_summary.discovery.debug_report import (
+            save_vacation_blend_debug_report,
+            vacation_blend_debug_report_path,
+        )
+        from post_trip_summary.discovery.models import ThemeScore
+        from post_trip_summary.discovery.serialization import (
+            load_vacation_blend,
+            save_vacation_blend,
+            vacation_blend_path,
+        )
+        from post_trip_summary.discovery.taxonomy import get_theme_label, validate_theme_ids
+
+        try:
+            body = await request.json()
+        except Exception:
+            raise HTTPException(400, "Malformed JSON body")
+        if not isinstance(body, dict):
+            raise HTTPException(400, "JSON body must be an object")
+
+        primary_ids = body.get("primary_theme_ids", body.get("primary_themes", []))
+        secondary_ids = body.get("secondary_theme_ids", body.get("secondary_themes", []))
+        if not isinstance(primary_ids, list) or not isinstance(secondary_ids, list):
+            raise HTTPException(400, "primary and secondary theme IDs must be lists")
+        if not all(isinstance(theme_id, str) for theme_id in primary_ids + secondary_ids):
+            raise HTTPException(400, "theme IDs must be strings")
+
+        if len(primary_ids) != len(set(primary_ids)):
+            raise HTTPException(400, "duplicate primary theme IDs")
+        if len(secondary_ids) != len(set(secondary_ids)):
+            raise HTTPException(400, "duplicate secondary theme IDs")
+        overlap = sorted(set(primary_ids).intersection(secondary_ids))
+        if overlap:
+            raise HTTPException(400, f"theme IDs cannot be both primary and secondary: {', '.join(overlap)}")
+
+        try:
+            validate_theme_ids(primary_ids + secondary_ids)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc))
+
+        artifact_path = vacation_blend_path(app.state.session.session_dir)
+        if not artifact_path.exists():
+            raise HTTPException(404, "Vacation blend artifact not found")
+
+        blend = load_vacation_blend(artifact_path)
+        existing_scores = {
+            score.theme_id: score
+            for score in [*blend.primary, *blend.secondary]
+        }
+        diagnostics_scores = blend.diagnostics.get("theme_scores", {})
+        if not isinstance(diagnostics_scores, dict):
+            diagnostics_scores = {}
+
+        def _score_for(theme_id: str) -> ThemeScore:
+            if theme_id in existing_scores:
+                return existing_scores[theme_id]
+            return ThemeScore(
+                theme_id=theme_id,
+                label=get_theme_label(theme_id),
+                score=float(diagnostics_scores.get(theme_id, 0.0)),
+                evidence=[],
+                sample_event_ids=[],
+            )
+
+        previous_selected = {score.theme_id for score in [*blend.primary, *blend.secondary]}
+        selected = set(primary_ids).union(secondary_ids)
+        rejected = set(blend.rejected)
+        rejected.update(previous_selected - selected)
+        rejected.difference_update(selected)
+
+        blend.primary = [_score_for(theme_id) for theme_id in primary_ids]
+        blend.secondary = [_score_for(theme_id) for theme_id in secondary_ids]
+        blend.rejected = sorted(rejected)
+        save_vacation_blend(artifact_path, blend)
+        save_vacation_blend_debug_report(
+            vacation_blend_debug_report_path(app.state.session.session_dir),
+            blend,
+        )
+
+        if app.state.session.current_stage == "reviewed":
+            app.state.session.current_stage = "discovered"
+            app.state.session.save()
+
+        return JSONResponse({
+            "stage": app.state.session.current_stage,
+            "next_step": STAGE_TO_STEP.get(app.state.session.current_stage, "enrich"),
+            "primary": [score.label for score in blend.primary],
+            "primary_theme_ids": [score.theme_id for score in blend.primary],
+        })
+
     @app.get("/wizard/enrich", response_class=HTMLResponse)
     def wizard_enrich():
         if app.state.trip is None:
             return RedirectResponse("/wizard/setup", status_code=307)
+        if app.state.session.current_stage == "reviewed":
+            return RedirectResponse("/wizard/discovery", status_code=307)
         # If already enriched, redirect forward
-        if app.state.session.current_stage not in ("reviewed", "enriched"):
+        if app.state.session.current_stage not in ("reviewed", "discovered", "enriched"):
             step = STAGE_TO_STEP.get(app.state.session.current_stage, "setup")
             if step not in ("enrich", "highlights", "generate"):
                 return RedirectResponse(f"/wizard/{step}", status_code=307)
@@ -677,12 +838,25 @@ def create_app(session: SessionConfig) -> FastAPI:
 
         files = []
 
+        # Generate route map for story/PDF outputs
+        map_image = _generate_static_map(trip, output_dir)
+
         if body.get("photo_prep"):
             from post_trip_summary.output.photo_prep import prepare_photos
             prepare_photos(trip, output_dir)
             files.append({
                 "type": "photo_prep",
                 "path": str(output_dir / "photos"),
+            })
+
+        if body.get("trip_story"):
+            from post_trip_summary.output.trip_story import generate_trip_story
+            out = output_dir / "trip-story.html"
+            generate_trip_story(trip, out, map_image=map_image)
+            files.append({
+                "type": "trip_story",
+                "path": str(out),
+                "preview_url": "/story",
             })
 
         if body.get("detailed_record"):
@@ -694,9 +868,6 @@ def create_app(session: SessionConfig) -> FastAPI:
                 "path": str(out),
                 "preview_url": "/detailed",
             })
-
-        # Generate route map for the PDF
-        map_image = _generate_static_map(trip, output_dir)
 
         if body.get("shareable_pdf"):
             from post_trip_summary.output.shareable_pdf import generate_shareable_pdf
@@ -728,6 +899,17 @@ def create_app(session: SessionConfig) -> FastAPI:
         })
 
     # --- Output preview endpoints ---
+
+    @app.get("/story", response_class=HTMLResponse)
+    def preview_story():
+        if app.state.trip is None:
+            raise HTTPException(404, "No trip loaded")
+        from post_trip_summary.output.trip_story import build_story_context
+        template = env.get_template("trip_story.html")
+        return HTMLResponse(template.render(**build_story_context(
+            app.state.trip,
+            map_image=None,
+        )))
 
     @app.get("/detailed", response_class=HTMLResponse)
     def preview_detailed():
