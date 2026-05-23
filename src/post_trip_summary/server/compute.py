@@ -168,5 +168,11 @@ def _run_skeleton(session, trip_data, progress_callback=None):
     from post_trip_summary.pipeline.skeleton import build_skeleton
     gap = session.settings.get("cluster_time_gap_minutes", 15)
     dist = session.settings.get("cluster_distance_meters", 200)
-    return build_skeleton(trip_data, gap_minutes=gap, distance_meters=dist,
-                         progress_callback=progress_callback)
+    trip = build_skeleton(
+        trip_data,
+        gap_minutes=gap,
+        distance_meters=dist,
+        progress_callback=progress_callback,
+    )
+    trip.name = session.name
+    return trip

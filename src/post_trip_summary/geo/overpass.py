@@ -9,11 +9,14 @@ from post_trip_summary.geo.util import interruptible_sleep, locationiq_throttle
 logger = logging.getLogger(__name__)
 
 # Priority order for POI categories (lower index = higher priority)
-_CATEGORY_PRIORITY = ["tourism", "historic", "amenity", "leisure"]
+_CATEGORY_PRIORITY = ["aeroway", "tourism", "historic", "amenity", "leisure"]
 
 # Within tourism, destination types rank higher than support/info types
 _TOURISM_HIGH = {"attraction", "museum", "gallery", "theme_park", "zoo", "aquarium", "artwork"}
 _TOURISM_LOW = {"information", "viewpoint", "picnic_site", "camp_site", "caravan_site"}
+_AEROWAY_HIGH = {"aerodrome"}
+_AEROWAY_LOW = {"gate"}
+_AIRPORT_AUGMENT_RADIUS_M = 1500
 
 # ---------------------------------------------------------------------------
 # Shared helpers
@@ -21,7 +24,14 @@ _TOURISM_LOW = {"information", "viewpoint", "picnic_site", "camp_site", "caravan
 
 def _sort_key(r: dict) -> tuple:
     cat_rank = _CATEGORY_PRIORITY.index(r["category"]) if r["category"] in _CATEGORY_PRIORITY else 99
-    if r["category"] == "tourism":
+    if r["category"] == "aeroway":
+        if r["type"] in _AEROWAY_HIGH:
+            subtype_rank = 0
+        elif r["type"] in _AEROWAY_LOW:
+            subtype_rank = 2
+        else:
+            subtype_rank = 1
+    elif r["category"] == "tourism":
         if r["type"] in _TOURISM_HIGH:
             subtype_rank = 0
         elif r["type"] in _TOURISM_LOW:
@@ -51,6 +61,7 @@ _LIQ_MIN_INTERVAL = 0.5  # unused, throttle is in util.py
 
 # Map LocationIQ class names to our category system
 _LIQ_CLASS_MAP = {
+    "aeroway": "aeroway",
     "tourism": "tourism",
     "historic": "historic",
     "amenity": "amenity",
@@ -76,7 +87,7 @@ def locationiq_poi_search(lat: float, lon: float, radius_m: int = 300) -> list[d
 
     locationiq_throttle()
 
-    tag = "tourism:*,historic:*,amenity:restaurant,amenity:cafe,amenity:museum,amenity:gallery,amenity:theatre,amenity:library,amenity:place_of_worship,amenity:bar,amenity:pub,leisure:park,leisure:garden,leisure:nature_reserve,leisure:stadium"
+    tag = "aeroway:aerodrome,aeroway:terminal,aeroway:gate,tourism:*,historic:*,amenity:restaurant,amenity:cafe,amenity:museum,amenity:gallery,amenity:theatre,amenity:library,amenity:place_of_worship,amenity:bar,amenity:pub,leisure:park,leisure:garden,leisure:nature_reserve,leisure:stadium"
 
     try:
         resp = requests.get(
@@ -175,9 +186,13 @@ def overpass_poi_search(lat: float, lon: float, radius_m: int = 300) -> list[dic
         "|place_of_worship|bar|pub"
     )
     leisure_filter = "park|garden|nature_reserve|stadium"
+    aeroway_filter = "aerodrome|terminal|gate"
 
     query = f"""[out:json][timeout:10];
 (
+  node["aeroway"~"{aeroway_filter}"]["name"](around:{radius_m},{lat},{lon});
+  way["aeroway"~"{aeroway_filter}"]["name"](around:{radius_m},{lat},{lon});
+  relation["aeroway"~"{aeroway_filter}"]["name"](around:{radius_m},{lat},{lon});
   node["tourism"]["name"](around:{radius_m},{lat},{lon});
   way["tourism"]["name"](around:{radius_m},{lat},{lon});
   relation["tourism"]["name"](around:{radius_m},{lat},{lon});
@@ -294,6 +309,43 @@ def poi_search(lat: float, lon: float, radius_m: int = 300) -> list[dict]:
     """
     results = locationiq_poi_search(lat, lon, radius_m=radius_m)
     if results:
+        if _needs_airport_aerodrome_augmentation(results):
+            augmented = results + overpass_poi_search(
+                lat,
+                lon,
+                radius_m=max(radius_m, _AIRPORT_AUGMENT_RADIUS_M),
+            )
+            return _dedupe_and_sort_pois(augmented)
         return results
 
     return overpass_poi_search(lat, lon, radius_m=radius_m)
+
+
+def _needs_airport_aerodrome_augmentation(results: list[dict]) -> bool:
+    has_airport_terminal = any(
+        result.get("category") == "aeroway"
+        and result.get("type") in {"terminal", "gate"}
+        for result in results
+    )
+    has_aerodrome = any(
+        result.get("category") == "aeroway"
+        and result.get("type") == "aerodrome"
+        for result in results
+    )
+    return has_airport_terminal and not has_aerodrome
+
+
+def _dedupe_and_sort_pois(results: list[dict]) -> list[dict]:
+    deduped: dict[tuple[str, str, str], dict] = {}
+    for result in results:
+        key = (
+            str(result.get("name", "")).casefold(),
+            str(result.get("category", "")),
+            str(result.get("type", "")),
+        )
+        existing = deduped.get(key)
+        if existing is None or float(result.get("distance_m", 0.0)) < float(existing.get("distance_m", 0.0)):
+            deduped[key] = result
+    sorted_results = list(deduped.values())
+    sorted_results.sort(key=_sort_key)
+    return sorted_results

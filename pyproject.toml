@@ -32,6 +32,9 @@ post-trip-summary = "post_trip_summary.cli:cli"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+post_trip_summary = ["data/*.csv"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]

@@ -362,6 +362,81 @@ def discover(slug: str, base_dir: Path | None):
     click.echo(f"Debug report: {debug_report_path}")
 
 
+@cli.command("geocode-audit")
+@click.argument("slug")
+@click.option(
+    "--stage",
+    default="ingested",
+    show_default=True,
+    type=click.Choice(["ingested", "reviewed", "enriched", "highlights_done", "skeleton", "skeleton_reviewed", "final"]),
+    help="Trip stage file to inspect.",
+)
+@click.option("--only-airports", is_flag=True, help="Only show events with airport signals or airport matches.")
+@click.option("--limit", default=25, show_default=True, help="Maximum events to print; use 0 for all.")
+@click.option("--base-dir", type=click.Path(path_type=Path), default=None, hidden=True)
+def geocode_audit(slug: str, stage: str, only_airports: bool, limit: int, base_dir: Path | None):
+    """Print event geocode candidates and local airport matches."""
+    base = base_dir or DEFAULT_BASE_DIR
+    session = load_session(slug, base_dir=base)
+    trip_file = session.stage_file(stage)
+    if not trip_file.exists():
+        raise click.ClickException(f"No {stage} data found for session '{slug}'.")
+
+    from post_trip_summary.geo.airports import resolve_airport_candidate
+    from post_trip_summary.serialization import load_trip
+
+    trip = load_trip(trip_file)
+    printed = 0
+    for day in trip.days:
+        for event in day.events:
+            if not event.location or not event.location.lat or not event.location.lon:
+                continue
+            context = event.geo_context or {}
+            airport_candidate = resolve_airport_candidate(event.location.lat, event.location.lon, context)
+            if only_airports and not (context.get("is_airport") or airport_candidate):
+                continue
+
+            click.echo(f"{event.id or '-'} | {day.date.isoformat()} | {event.name}")
+            click.echo(f"  coords: {event.location.lat:.6f}, {event.location.lon:.6f}")
+            _echo_geo_context(context)
+            if airport_candidate:
+                click.echo(
+                    "  airport lookup: "
+                    f"{airport_candidate['display_name']} "
+                    f"({airport_candidate['distance_m']}m, {airport_candidate['source']})"
+                )
+            if event.name_candidates:
+                candidates = ", ".join(f"{label}={name}" for label, name in event.name_candidates.items())
+                click.echo(f"  name candidates: {candidates}")
+
+            printed += 1
+            if limit and printed >= limit:
+                return
+
+    if printed == 0:
+        click.echo("No geocoded events matched the audit filters.")
+
+
+def _echo_geo_context(context: dict[str, object]) -> None:
+    fields = [
+        ("area", context.get("area_name")),
+        ("poi", context.get("poi_name")),
+        ("poi_type", _format_poi_type(context)),
+        ("airport", context.get("airport_name")),
+    ]
+    details = [f"{label}: {value}" for label, value in fields if value]
+    if details:
+        click.echo(f"  context: {'; '.join(details)}")
+
+
+def _format_poi_type(context: dict[str, object]) -> str:
+    category = str(context.get("poi_category", "") or "")
+    poi_type = str(context.get("poi_type", "") or "")
+    if category and poi_type:
+        return f"{category}/{poi_type}"
+    return category or poi_type
+
+
 @cli.command()
 @click.argument("slug")
 @click.option("--base-dir", type=click.Path(path_type=Path), default=None, hidden=True)
@@ -496,17 +571,8 @@ def pick_highlights(slug: str, port: int, base_dir: Path | None):
 def _generate_static_map(trip, output_dir) -> str | None:
     """Generate a static map image showing major stops. Returns relative path or None."""
     try:
-        from staticmap import StaticMap, CircleMarker
-        m = StaticMap(800, 400)
-        for day in trip.days:
-            for event in day.events:
-                if event.location.lat and event.location.lon:
-                    m.add_marker(CircleMarker((event.location.lon, event.location.lat), "#e74c3c", 8))
-        if m.markers:
-            map_path = output_dir / "route-map.png"
-            image = m.render()
-            image.save(str(map_path))
-            return "route-map.png"
+        from post_trip_summary.output.route_map import generate_static_route_map
+        return generate_static_route_map(trip, output_dir)
     except Exception as e:
         click.echo(f"  Warning: Map generation failed ({e}). Skipping.")
     return None

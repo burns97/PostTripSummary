@@ -7,9 +7,22 @@ from geopy.distance import geodesic
 from post_trip_summary.models import (
     Trip, Day, Event, Photo, Location, Accommodation, Transit, Expense,
 )
+from post_trip_summary.geo.airports import resolve_airport_candidate
 from post_trip_summary.geo.clustering import build_clusters, merge_nearby_clusters, detect_and_collapse_transit
+from post_trip_summary.geo.context import build_geo_context
 from post_trip_summary.geo.interpolate import interpolate_missing_gps
 from post_trip_summary.geo.reverse_geocode import reverse_geocode
+
+MINOR_WALKING_POI_TYPES = {
+    ("amenity", "bar"),
+    ("amenity", "cafe"),
+    ("amenity", "pub"),
+    ("amenity", "restaurant"),
+    ("historic", "memorial"),
+    ("tourism", "artwork"),
+    ("tourism", "hotel"),
+    ("tourism", "information"),
+}
 
 
 def _match_cluster_to_itinerary(
@@ -219,11 +232,32 @@ def build_skeleton(
         geo_poi = geo.get("poi_name", "")
         overpass_poi = geo.get("overpass_poi_name", "")
         geo_area = geo.get("area_name", "") or geo.get("city", "")
+        geo_context = build_geo_context(geo, cluster) if centroid else {}
+        airport_candidate = (
+            resolve_airport_candidate(centroid[0], centroid[1], geo_context)
+            if centroid else None
+        )
+        if airport_candidate:
+            airport_name = str(airport_candidate["display_name"])
+            geo_context.update(
+                {
+                    "airport_name": airport_name,
+                    "airport_iata": airport_candidate.get("iata_code", ""),
+                    "airport_icao": airport_candidate.get("icao_code", ""),
+                    "airport_distance_m": airport_candidate.get("distance_m", 0.0),
+                    "airport_source": airport_candidate.get("source", ""),
+                    "is_airport": True,
+                }
+            )
+        else:
+            airport_name = str(geo_context.get("airport_name", "") or "")
 
         # Collect all name candidates for the review UI
         name_candidates = {}
         if google_match and google_match.get("name"):
             name_candidates["Google Maps"] = google_match["name"]
+        if airport_name:
+            name_candidates["Airport"] = airport_name
         if geo_poi:
             name_candidates["Geocode POI"] = geo_poi
         # Add individual geocoder POI fields as separate candidates when they differ
@@ -263,6 +297,14 @@ def build_skeleton(
         if google_match:
             name = google_match.get("name", "")
             sources.append("google_maps")
+        elif airport_name:
+            name = airport_name
+            if airport_candidate:
+                sources.append("airport_lookup")
+        elif _should_prefer_area_for_airport_terminal(geo_context):
+            name = geo_area
+        elif _should_prefer_area_for_broad_walk(geo_context):
+            name = geo_area
         elif overpass_destination and overpass_destination != geo_poi:
             name = overpass_destination
         elif geo_poi:
@@ -299,6 +341,7 @@ def build_skeleton(
             )
         else:
             place_name = ""
+            geo_context = {}
             location = Location(lat=0, lon=0, name=name, address=None, city="", country="")
 
         # For transit clusters, build a "City A to City B" name from endpoints
@@ -324,6 +367,7 @@ def build_skeleton(
             notes="",
             sources=sources,
             name_candidates=name_candidates,
+            geo_context=geo_context,
         )
         events_by_date[c_date].append(event)
 
@@ -390,4 +434,29 @@ def build_skeleton(
         accommodations=accommodations,
         transits=transits,
         expenses=expenses,
+    )
+
+
+def _should_prefer_area_for_broad_walk(geo_context: dict[str, object]) -> bool:
+    if not geo_context.get("is_broad_walking_cluster"):
+        return False
+    if not geo_context.get("area_name"):
+        return False
+    category = str(geo_context.get("poi_category", "") or "")
+    poi_type = str(geo_context.get("poi_type", "") or "")
+    if category == "shop":
+        return True
+    return (category, poi_type) in MINOR_WALKING_POI_TYPES
+
+
+def _should_prefer_area_for_airport_terminal(geo_context: dict[str, object]) -> bool:
+    if not geo_context.get("is_airport"):
+        return False
+    if geo_context.get("airport_name"):
+        return False
+    if not geo_context.get("area_name"):
+        return False
+    return (
+        str(geo_context.get("poi_category", "") or "") == "aeroway"
+        and str(geo_context.get("poi_type", "") or "") in {"terminal", "gate"}
     )

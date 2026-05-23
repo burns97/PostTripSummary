@@ -186,6 +186,11 @@ def discover_vacation_blend(trip: Trip) -> VacationBlend:
             _add_evidence(evidence[theme_id], reason)
             _add_sample(sample_event_ids[theme_id], event.id)
 
+        for theme_id, score, reason in _geo_context_boosts(event):
+            theme_scores[theme_id] += score
+            _add_evidence(evidence[theme_id], reason)
+            _add_sample(sample_event_ids[theme_id], event.id)
+
         start_hour = event.time_range[0].hour
         if start_hour >= 20 or start_hour <= 4:
             theme_scores["nightlife_events"] += 8.0
@@ -265,6 +270,13 @@ def discover_vacation_blend(trip: Trip) -> VacationBlend:
         "photo_count": sum(len(event.photos) for event in events),
         "city_count": movement["city_count"],
         "country_count": movement["country_count"],
+        "all_city_count": movement["all_city_count"],
+        "all_country_count": movement["all_country_count"],
+        "destination_city_count": movement["destination_city_count"],
+        "destination_country_count": movement["destination_country_count"],
+        "transit_city_count": movement["transit_city_count"],
+        "destination_event_count": movement["destination_event_count"],
+        "travel_logistics_event_count": movement["travel_logistics_event_count"],
         "day_count": movement["day_count"],
         "gps_distance_km": round(movement["gps_distance_km"], 1),
         "destination_movement_km": round(movement["destination_movement_km"], 1),
@@ -272,6 +284,7 @@ def discover_vacation_blend(trip: Trip) -> VacationBlend:
         "long_haul_segment_count": movement["long_haul_segment_count"],
         "road_trip_eligible": road_trip_eligible,
         "coverage": coverage,
+        "geo_context": _geo_context_summary(events),
         "theme_scores": clamped_scores,
     }
 
@@ -324,6 +337,89 @@ def _event_type_boosts(event: Event, event_text: str) -> tuple[tuple[str, float,
     return (("culture_sightseeing", 10.0, "landmark events"),)
 
 
+def _geo_context_boosts(event: Event) -> tuple[tuple[str, float, str], ...]:
+    if _is_travel_logistics_event(event):
+        return ()
+
+    context = event.geo_context or {}
+    if not context:
+        return ()
+
+    signals = [
+        (
+            str(context.get("poi_category", "") or "").lower(),
+            str(context.get("poi_type", "") or "").lower(),
+            str(context.get("place_name", "") or context.get("poi_name", "") or ""),
+        )
+    ]
+    for poi in context.get("nearby_pois", []):
+        if not isinstance(poi, dict):
+            continue
+        signals.append(
+            (
+                str(poi.get("category", "") or "").lower(),
+                str(poi.get("type", "") or "").lower(),
+                str(poi.get("name", "") or ""),
+            )
+        )
+
+    best_by_theme: dict[str, tuple[float, str]] = {}
+    for category, poi_type, name in signals:
+        for theme_id, score in _theme_boosts_for_geo_signal(category, poi_type):
+            reason = _geo_context_reason(category, poi_type, name)
+            existing = best_by_theme.get(theme_id)
+            if existing is None or score > existing[0]:
+                best_by_theme[theme_id] = (score, reason)
+
+    return tuple(
+        (theme_id, score, reason)
+        for theme_id, (score, reason) in best_by_theme.items()
+    )
+
+
+def _theme_boosts_for_geo_signal(
+    category: str,
+    poi_type: str,
+) -> tuple[tuple[str, float], ...]:
+    if category == "historic":
+        return (("culture_sightseeing", 14.0),)
+    if category == "natural":
+        return (("nature_wildlife", 14.0),)
+    if category == "shop":
+        return (("shopping_city", 12.0),)
+
+    if category == "amenity":
+        if poi_type in {"restaurant", "cafe"}:
+            return (("food_drink", 12.0),)
+        if poi_type in {"bar", "pub"}:
+            return (("food_drink", 8.0), ("nightlife_events", 8.0))
+        if poi_type in {"museum", "gallery", "theatre", "library", "place_of_worship"}:
+            return (("culture_sightseeing", 12.0),)
+
+    if category == "leisure":
+        if poi_type in {"park", "garden", "nature_reserve"}:
+            return (("nature_wildlife", 12.0),)
+        if poi_type == "stadium":
+            return (("nightlife_events", 6.0),)
+
+    if category == "tourism":
+        if poi_type in {"museum", "gallery", "artwork", "theme_park", "attraction"}:
+            return (("culture_sightseeing", 16.0),)
+        if poi_type in {"viewpoint", "camp_site", "picnic_site"}:
+            return (("nature_wildlife", 12.0), ("adventure_outdoors", 8.0))
+        if poi_type in {"zoo", "aquarium"}:
+            return (("nature_wildlife", 12.0),)
+        return (("culture_sightseeing", 8.0),)
+
+    return ()
+
+
+def _geo_context_reason(category: str, poi_type: str, name: str) -> str:
+    type_label = f"/{poi_type}" if poi_type else ""
+    place = f" near {name}" if name else ""
+    return f"geo context: {category}{type_label}{place}".strip()
+
+
 def _matched_keywords(text: str, keywords: tuple[str, ...]) -> list[str]:
     return [
         keyword
@@ -333,11 +429,30 @@ def _matched_keywords(text: str, keywords: tuple[str, ...]) -> list[str]:
 
 
 def _movement_diagnostics(trip: Trip, events: list[Event]) -> dict[str, object]:
-    cities = {event.location.city for event in events if event.location.city}
-    countries = {event.location.country for event in events if event.location.country}
+    destination_events = [event for event in events if not _is_travel_logistics_event(event)]
+    travel_logistics_events = [
+        event for event in events if _is_travel_logistics_event(event)
+    ]
+    all_cities = {event.location.city for event in events if event.location.city}
+    all_countries = {event.location.country for event in events if event.location.country}
+    destination_cities = {
+        event.location.city for event in destination_events if event.location.city
+    }
+    destination_countries = {
+        event.location.country for event in destination_events if event.location.country
+    }
+    transit_cities = {
+        event.location.city for event in travel_logistics_events if event.location.city
+    }
     event_points = sorted(
         [
-            (event.id, event.time_range[0], event.location.lat, event.location.lon)
+            (
+                event.id,
+                event.time_range[0],
+                event.location.lat,
+                event.location.lon,
+                _is_travel_logistics_event(event),
+            )
             for event in events
             if _has_real_coordinates(event.location.lat, event.location.lon)
         ],
@@ -353,7 +468,7 @@ def _movement_diagnostics(trip: Trip, events: list[Event]) -> dict[str, object]:
         key=lambda item: item[0],
     )
     distance_points = (
-        [(event_id, lat, lon) for event_id, _, lat, lon in event_points]
+        [(event_id, lat, lon, is_logistics) for event_id, _, lat, lon, is_logistics in event_points]
         or [(None, lat, lon) for _, lat, lon in photo_points]
     )
     movement = _segmented_path_distance(distance_points)
@@ -363,10 +478,17 @@ def _movement_diagnostics(trip: Trip, events: list[Event]) -> dict[str, object]:
         if event_id is not None
     ][:4]
     if not movement_event_ids:
-        movement_event_ids = [event_id for event_id, _, _, _ in event_points[:4]]
+        movement_event_ids = [event_id for event_id, _, _, _, _ in event_points[:4]]
     return {
-        "city_count": len(cities),
-        "country_count": len(countries),
+        "city_count": len(destination_cities),
+        "country_count": len(destination_countries),
+        "all_city_count": len(all_cities),
+        "all_country_count": len(all_countries),
+        "destination_city_count": len(destination_cities),
+        "destination_country_count": len(destination_countries),
+        "transit_city_count": len(transit_cities),
+        "destination_event_count": len(destination_events),
+        "travel_logistics_event_count": len(travel_logistics_events),
         "day_count": len(trip.days),
         "gps_point_count": len(distance_points),
         "gps_distance_km": movement["gps_distance_km"],
@@ -378,7 +500,7 @@ def _movement_diagnostics(trip: Trip, events: list[Event]) -> dict[str, object]:
 
 
 def _segmented_path_distance(
-    points: list[tuple[str | None, float, float]]
+    points: list[tuple]
 ) -> dict[str, object]:
     gps_distance_km = 0.0
     destination_movement_km = 0.0
@@ -387,13 +509,15 @@ def _segmented_path_distance(
     destination_event_ids: list[str | None] = []
 
     for start, end in zip(points, points[1:]):
-        _, start_lat, start_lon = start
-        end_id, end_lat, end_lon = end
+        _, start_lat, start_lon, start_is_logistics = _distance_point(start)
+        end_id, end_lat, end_lon, end_is_logistics = _distance_point(end)
         distance = _distance_km((start_lat, start_lon), (end_lat, end_lon))
         gps_distance_km += distance
         if distance >= LONG_HAUL_SEGMENT_KM:
             long_haul_transit_km += distance
             long_haul_segment_count += 1
+            continue
+        if start_is_logistics and end_is_logistics:
             continue
         destination_movement_km += distance
         destination_event_ids.append(end_id)
@@ -405,6 +529,94 @@ def _segmented_path_distance(
         "long_haul_segment_count": long_haul_segment_count,
         "destination_event_ids": destination_event_ids,
     }
+
+
+def _distance_point(point: tuple) -> tuple[str | None, float, float, bool]:
+    if len(point) == 3:
+        event_id, lat, lon = point
+        return event_id, lat, lon, False
+    event_id, lat, lon, is_logistics = point
+    return event_id, lat, lon, bool(is_logistics)
+
+
+def _geo_context_summary(events: list[Event]) -> dict[str, object]:
+    granularity_counts: dict[str, int] = defaultdict(int)
+    category_counts: dict[str, int] = defaultdict(int)
+    type_counts: dict[str, int] = defaultdict(int)
+    events_with_geo_context = 0
+    airport_event_count = 0
+
+    for event in events:
+        context = event.geo_context or {}
+        if not context:
+            continue
+        events_with_geo_context += 1
+        if context.get("is_airport") is True:
+            airport_event_count += 1
+        _count_context_value(granularity_counts, context.get("location_granularity"))
+        event_categories = _event_context_values(context, "poi_category", "category")
+        event_types = _event_context_values(context, "poi_type", "type")
+        for category in event_categories:
+            category_counts[category] += 1
+        for poi_type in event_types:
+            type_counts[poi_type] += 1
+
+    return {
+        "events_with_geo_context": events_with_geo_context,
+        "airport_event_count": airport_event_count,
+        "location_granularity_counts": dict(sorted(granularity_counts.items())),
+        "poi_category_counts": dict(sorted(category_counts.items())),
+        "poi_type_counts": dict(sorted(type_counts.items())),
+    }
+
+
+def _event_context_values(
+    context: dict[str, object],
+    primary_key: str,
+    nearby_key: str,
+) -> set[str]:
+    values = {str(context[primary_key])} if context.get(primary_key) else set()
+    for poi in context.get("nearby_pois", []):
+        if not isinstance(poi, dict):
+            continue
+        value = poi.get(nearby_key)
+        if value:
+            values.add(str(value))
+    return values
+
+
+def _count_context_value(counts: dict[str, int], value: object) -> None:
+    if value:
+        counts[str(value)] += 1
+
+
+def _is_travel_logistics_event(event: Event) -> bool:
+    if event.geo_context.get("is_airport") is True:
+        return True
+    text = " ".join(
+        str(part).lower()
+        for part in [
+            event.type,
+            event.name,
+            event.location.name,
+            event.description,
+            event.summary,
+            event.notes,
+        ]
+        if part
+    )
+    logistics_terms = (
+        "airport",
+        "layover",
+        "departure",
+        "arrival",
+        "terminal",
+        "gate",
+        "flight",
+    )
+    if event.type == "transit" and any(term in text for term in logistics_terms):
+        return True
+    return any(term in text for term in ("airport", "layover", "terminal", "gate"))
 
 
 def _coverage_diagnostics(trip: Trip) -> dict[str, object]:
