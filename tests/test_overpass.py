@@ -7,6 +7,7 @@ import requests
 from post_trip_summary.geo.overpass import (
     overpass_poi_search,
     pick_best_overpass_poi,
+    poi_search,
 )
 
 
@@ -119,6 +120,36 @@ class TestOverpassPoiSearchSorting:
 
     @patch("post_trip_summary.geo.overpass.requests.post")
     @patch("post_trip_summary.geo.overpass._last_request_times", {})
+    def test_airport_aeroway_beats_terminal_amenities(self, mock_post):
+        base_lat, base_lon = 39.9979, -82.8825
+
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "elements": [
+                _overpass_element("Brewdog", "amenity", "bar", base_lat + 0.0001, base_lon),
+                _overpass_element(
+                    "John Glenn Columbus International Airport",
+                    "aeroway",
+                    "aerodrome",
+                    base_lat + 0.001,
+                    base_lon,
+                    el_type="way",
+                ),
+                _overpass_element("Starbucks", "amenity", "cafe", base_lat + 0.0002, base_lon),
+            ],
+        }
+        mock_post.return_value = mock_response
+
+        results = overpass_poi_search(base_lat, base_lon, radius_m=500)
+
+        assert results[0]["name"] == "John Glenn Columbus International Airport"
+        assert results[0]["category"] == "aeroway"
+        assert results[0]["type"] == "aerodrome"
+        assert [result["name"] for result in results[1:]] == ["Brewdog", "Starbucks"]
+
+    @patch("post_trip_summary.geo.overpass.requests.post")
+    @patch("post_trip_summary.geo.overpass._last_request_times", {})
     def test_elements_without_name_are_skipped(self, mock_post):
         mock_response = MagicMock()
         mock_response.status_code = 200
@@ -141,6 +172,28 @@ class TestOverpassPoiSearchSorting:
 
         results = overpass_poi_search(48.0, 2.0)
         assert results == []
+
+    @patch("post_trip_summary.geo.overpass.overpass_poi_search")
+    @patch("post_trip_summary.geo.overpass.locationiq_poi_search")
+    def test_terminal_only_locationiq_results_are_augmented_with_airport_aerodrome(
+        self,
+        mock_locationiq,
+        mock_overpass,
+    ):
+        mock_locationiq.return_value = [
+            _poi("Ticketing Level", "aeroway", "terminal", 73.0),
+            _poi("Brewdog", "amenity", "bar", 14.0),
+        ]
+        mock_overpass.return_value = [
+            _poi("John Glenn Columbus International Airport", "aeroway", "aerodrome", 450.0),
+        ]
+
+        results = poi_search(39.9979, -82.8825, radius_m=300)
+
+        assert results[0]["name"] == "John Glenn Columbus International Airport"
+        assert results[0]["type"] == "aerodrome"
+        assert "Ticketing Level" in [result["name"] for result in results]
+        mock_overpass.assert_called_once_with(39.9979, -82.8825, radius_m=1500)
 
 
 # ---------------------------------------------------------------------------

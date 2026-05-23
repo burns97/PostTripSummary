@@ -12,10 +12,13 @@ from post_trip_summary.settings import get_geocoding_settings
 
 logger = logging.getLogger(__name__)
 
+GEO_SCHEMA_VERSION = 3
+
 _EMPTY_RESULT = {
+    "geo_schema_version": GEO_SCHEMA_VERSION,
     "city": "", "country": "", "admin1": "", "admin2": "",
     "suburb": "", "municipality": "", "tourism": "", "leisure": "",
-    "natural": "", "state_district": "", "amenity": "", "shop": "",
+    "natural": "", "state_district": "", "aeroway": "", "amenity": "", "shop": "",
     "historic": "", "road": "",
     "poi_name": "", "area_name": "", "place_name": "",
     "overpass_poi_name": "", "overpass_pois": [],
@@ -46,6 +49,7 @@ def _build_geo_result(addr: dict) -> dict:
     suburb = addr.get("suburb", "")
     municipality = addr.get("municipality", "")
     tourism = addr.get("tourism", "")
+    aeroway = addr.get("aeroway", "")
     leisure = addr.get("leisure", "")
     natural = addr.get("natural", "")
     state_district = addr.get("state_district", "")
@@ -55,7 +59,7 @@ def _build_geo_result(addr: dict) -> dict:
     road = addr.get("road", "")
 
     # Specific POI name (most useful for event naming)
-    poi_name = tourism or amenity or leisure or historic or shop or natural or ""
+    poi_name = aeroway or tourism or amenity or leisure or historic or shop or natural or ""
 
     # Area/neighborhood name (useful for context)
     area_name = (
@@ -69,10 +73,12 @@ def _build_geo_result(addr: dict) -> dict:
     return {
         "city": city, "country": country, "admin1": admin1, "admin2": admin2,
         "suburb": suburb, "municipality": municipality, "tourism": tourism,
+        "aeroway": aeroway,
         "leisure": leisure, "natural": natural, "state_district": state_district,
         "amenity": amenity, "shop": shop, "historic": historic, "road": road,
         "poi_name": poi_name, "area_name": area_name, "place_name": place_name,
         "overpass_poi_name": "", "overpass_pois": [],
+        "geo_schema_version": GEO_SCHEMA_VERSION,
     }
 
 
@@ -173,12 +179,10 @@ def reverse_geocode(lat: float, lon: float) -> dict:
     # 1. Check persistent disk cache
     cached = _cache.get(lat_r, lon_r)
     if cached is not None:
-        # Backfill Overpass for entries cached before Overpass-always logic
-        if _overpass_enabled and cached.get("poi_name") and not cached.get("overpass_pois"):
-            pois = poi_search(lat_r, lon_r, radius_m=_overpass_radius_m)
-            cached["overpass_poi_name"] = pick_best_overpass_poi(pois)
-            cached["overpass_pois"] = pois
-            _cache.put(lat_r, lon_r, cached)
+        if _overpass_enabled and cached.get("geo_schema_version") != GEO_SCHEMA_VERSION:
+            _refresh_poi_candidates(lat_r, lon_r, cached)
+            cached["geo_schema_version"] = GEO_SCHEMA_VERSION
+            _cache_put(lat_r, lon_r, cached)
         return cached
 
     # 2. LocationIQ (if configured + not exhausted) -> Nominatim fallback
@@ -191,7 +195,8 @@ def reverse_geocode(lat: float, lon: float) -> dict:
         result["overpass_pois"] = pois
 
     # 4. Cache and return
-    _cache.put(lat_r, lon_r, result)
+    result["geo_schema_version"] = GEO_SCHEMA_VERSION
+    _cache_put(lat_r, lon_r, result)
     return result
 
 
@@ -199,6 +204,19 @@ def reverse_geocode_batch(coords: list[tuple[float, float]]) -> list[dict]:
     if not coords:
         return []
     return [reverse_geocode(lat, lon) for lat, lon in coords]
+
+
+def _refresh_poi_candidates(lat: float, lon: float, result: dict) -> None:
+    pois = poi_search(lat, lon, radius_m=_overpass_radius_m)
+    result["overpass_poi_name"] = pick_best_overpass_poi(pois)
+    result["overpass_pois"] = pois
+
+
+def _cache_put(lat: float, lon: float, result: dict) -> None:
+    try:
+        _cache.put(lat, lon, result)
+    except Exception:
+        logger.debug("Failed to write geocode cache for (%.4f, %.4f)", lat, lon, exc_info=True)
 
 
 def reset():

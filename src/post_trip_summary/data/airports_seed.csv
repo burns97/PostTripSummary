@@ -1,0 +1,20 @@
+ident,type,name,latitude_deg,longitude_deg,iso_country,municipality,scheduled_service,gps_code,iata_code,local_code
+KCMH,large_airport,John Glenn Columbus International Airport,39.998001,-82.891899,US,Columbus,yes,KCMH,CMH,CMH
+KDFW,large_airport,Dallas Fort Worth International Airport,32.896801,-97.038002,US,Dallas-Fort Worth,yes,KDFW,DFW,DFW
+KORD,large_airport,O'Hare International Airport,41.9786,-87.9048,US,Chicago,yes,KORD,ORD,ORD
+KATL,large_airport,Hartsfield Jackson Atlanta International Airport,33.6367,-84.428101,US,Atlanta,yes,KATL,ATL,ATL
+KDEN,large_airport,Denver International Airport,39.861698,-104.672997,US,Denver,yes,KDEN,DEN,DEN
+KLAX,large_airport,Los Angeles International Airport,33.942501,-118.407997,US,Los Angeles,yes,KLAX,LAX,LAX
+KSFO,large_airport,San Francisco International Airport,37.618999,-122.375,US,San Francisco,yes,KSFO,SFO,SFO
+KSEA,large_airport,Seattle Tacoma International Airport,47.449001,-122.308998,US,Seattle,yes,KSEA,SEA,SEA
+NZAA,large_airport,Auckland International Airport,-37.008099,174.792007,NZ,Auckland,yes,NZAA,AKL,
+NZCH,large_airport,Christchurch International Airport,-43.489399,172.531998,NZ,Christchurch,yes,NZCH,CHC,
+NZWN,large_airport,Wellington International Airport,-41.327202,174.804993,NZ,Wellington,yes,NZWN,WLG,
+NZQN,medium_airport,Queenstown International Airport,-45.021099,168.738998,NZ,Queenstown,yes,NZQN,ZQN,
+NZDN,medium_airport,Dunedin Airport,-45.928101,170.197998,NZ,Dunedin,yes,NZDN,DUD,
+NZRO,medium_airport,Rotorua Regional Airport,-38.1092,176.317001,NZ,Rotorua,yes,NZRO,ROT,
+NZNS,medium_airport,Nelson Airport,-41.298302,173.220993,NZ,Nelson,yes,NZNS,NSN,
+NZPM,medium_airport,Palmerston North Airport,-40.320599,175.617004,NZ,Palmerston North,yes,NZPM,PMR,
+NZNR,medium_airport,Hawke's Bay Airport,-39.465801,176.869995,NZ,Napier,yes,NZNR,NPE,
+NZTG,medium_airport,Tauranga Airport,-37.671902,176.195999,NZ,Tauranga,yes,NZTG,TRG,
+NZHK,medium_airport,Hokitika Airfield,-42.7136,170.985001,NZ,Hokitika,yes,NZHK,HKK,

@@ -28,6 +28,8 @@ DEFAULT_SETTINGS = {
         "locationiq_api_key": "",
         "overpass_enabled": True,
         "overpass_radius_m": 300,
+        "airport_lookup_enabled": True,
+        "airports_csv_path": "",
     },
 }
 
@@ -57,6 +59,12 @@ locationiq_api_key = ""
 # Overpass API for supplementary POI lookup
 overpass_enabled = true
 overpass_radius_m = 300
+
+# Local airport resolver for airport/flight photo clusters.
+# Leave airports_csv_path blank to use the bundled seed list. Optionally point
+# this at an OurAirports-compatible airports.csv for global coverage.
+airport_lookup_enabled = true
+airports_csv_path = ""
 """
 
 
@@ -149,4 +157,6 @@ def get_geocoding_settings(settings_file: Path | None = None) -> dict:
         "locationiq_api_key": api_key or None,
         "overpass_enabled": geo.get("overpass_enabled", True),
         "overpass_radius_m": geo.get("overpass_radius_m", 75),
+        "airport_lookup_enabled": geo.get("airport_lookup_enabled", True),
+        "airports_csv_path": geo.get("airports_csv_path", "") or os.environ.get("POST_TRIP_SUMMARY_AIRPORTS_CSV", ""),
     }

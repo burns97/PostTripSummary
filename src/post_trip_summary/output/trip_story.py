@@ -12,6 +12,14 @@ def _all_events(trip: Trip) -> list[Event]:
     return [event for day in trip.days for event in day.events]
 
 
+def _is_transit_event(event: Event) -> bool:
+    return (event.type or "").lower() == "transit"
+
+
+def _location_story_events(trip: Trip) -> list[Event]:
+    return [event for event in _all_events(trip) if not _is_transit_event(event)]
+
+
 def _kept_photos(event: Event) -> list[Photo]:
     return [photo for photo in event.photos if photo.is_kept]
 
@@ -62,10 +70,11 @@ def select_cover_photo(trip: Trip) -> Photo | None:
 def compute_story_stats(trip: Trip) -> dict[str, int]:
     """Compute story-facing stats from kept photos and all timeline events."""
     events = _all_events(trip)
+    location_events = _location_story_events(trip)
     kept_photos = [photo for event in events for photo in event.photos if photo.is_kept]
     highlights = [photo for photo in kept_photos if photo.is_highlight]
-    cities = {event.location.city for event in events if event.location.city}
-    countries = {event.location.country for event in events if event.location.country}
+    cities = {event.location.city for event in location_events if event.location.city}
+    countries = {event.location.country for event in location_events if event.location.country}
     return {
         "days": (trip.date_range[1] - trip.date_range[0]).days + 1,
         "stops": len(events),
@@ -78,7 +87,7 @@ def compute_story_stats(trip: Trip) -> dict[str, int]:
 
 def build_location_summary(trip: Trip) -> str:
     """Build a compact location summary for the story cover."""
-    events = _all_events(trip)
+    events = _location_story_events(trip)
     countries = _ordered_unique([event.location.country for event in events if event.location.country])
     cities = _ordered_unique([event.location.city for event in events if event.location.city])
 

@@ -1,6 +1,8 @@
 # tests/test_skeleton.py
 from datetime import date, datetime
 from pathlib import Path
+from unittest.mock import patch
+
 from post_trip_summary.models import (
     Photo, Location, Accommodation, Transit, TransitPoint, Expense, Event, Day, Trip,
 )
@@ -307,3 +309,334 @@ def test_build_skeleton_basic():
     assert isinstance(trip, Trip)
     assert len(trip.days) >= 1
     assert len(trip.days[0].events) >= 1
+
+
+def test_build_skeleton_persists_geo_context_for_discovery():
+    photos = [
+        _photo("2026-03-05 10:00:00", -38.288, 176.390),
+        _photo("2026-03-05 10:05:00", -38.289, 176.391),
+    ]
+    trip_data = {
+        "photos": photos,
+        "accommodations": [],
+        "transits": [],
+        "activities": [],
+        "expenses": [],
+        "google_maps": {"place_visits": [], "activity_segments": []},
+        "apple_health": [],
+        "dayone": [],
+    }
+    mock_geo = {
+        "city": "Rotorua",
+        "country": "NZ",
+        "admin1": "Bay of Plenty",
+        "admin2": "",
+        "suburb": "",
+        "municipality": "",
+        "tourism": "Waimangu Volcanic Valley",
+        "amenity": "",
+        "leisure": "",
+        "historic": "",
+        "shop": "",
+        "natural": "",
+        "road": "",
+        "poi_name": "Waimangu Volcanic Valley",
+        "area_name": "Rotorua",
+        "place_name": "Waimangu Volcanic Valley",
+        "overpass_poi_name": "Waimangu Volcanic Valley",
+        "overpass_pois": [
+            {
+                "name": "Waimangu Volcanic Valley",
+                "category": "tourism",
+                "type": "attraction",
+                "distance_m": 24.4,
+            },
+            {
+                "name": "Waimangu Cafe",
+                "category": "amenity",
+                "type": "cafe",
+                "distance_m": 80.0,
+            },
+        ],
+    }
+
+    with (
+        patch("post_trip_summary.pipeline.skeleton.reverse_geocode", return_value=mock_geo),
+        patch("post_trip_summary.pipeline.skeleton.resolve_airport_candidate", return_value=None),
+    ):
+        trip = build_skeleton(trip_data, gap_minutes=15, distance_meters=200)
+
+    event = trip.days[0].events[0]
+    assert event.geo_context["location_granularity"] == "poi"
+    assert event.geo_context["poi_category"] == "tourism"
+    assert event.geo_context["nearby_pois"][0]["type"] == "attraction"
+    assert event.geo_context["gps_photo_count"] == 2
+    assert event.geo_context["is_airport"] is False
+
+
+def test_build_skeleton_prefers_airport_over_terminal_amenity():
+    photos = [
+        _photo("2026-02-18 15:25:21", 39.99786388888889, -82.88245277777777),
+    ]
+    trip_data = {
+        "photos": photos,
+        "accommodations": [],
+        "transits": [],
+        "activities": [],
+        "expenses": [],
+        "google_maps": {"place_visits": [], "activity_segments": []},
+        "apple_health": [],
+        "dayone": [],
+    }
+    mock_geo = {
+        "city": "Columbus",
+        "country": "US",
+        "admin1": "Ohio",
+        "admin2": "Franklin County",
+        "suburb": "",
+        "municipality": "",
+        "tourism": "",
+        "amenity": "Brewdog",
+        "leisure": "",
+        "historic": "",
+        "shop": "",
+        "natural": "",
+        "road": "",
+        "poi_name": "Brewdog",
+        "area_name": "Columbus",
+        "place_name": "Columbus",
+        "overpass_poi_name": "John Glenn Columbus International Airport",
+        "overpass_pois": [
+            {
+                "name": "John Glenn Columbus International Airport",
+                "category": "aeroway",
+                "type": "aerodrome",
+                "distance_m": 140.0,
+            },
+            {
+                "name": "Brewdog",
+                "category": "amenity",
+                "type": "bar",
+                "distance_m": 14.0,
+            },
+            {
+                "name": "Eddie George's Grille 27",
+                "category": "amenity",
+                "type": "pub",
+                "distance_m": 42.0,
+            },
+        ],
+    }
+
+    with (
+        patch("post_trip_summary.pipeline.skeleton.reverse_geocode", return_value=mock_geo),
+        patch("post_trip_summary.pipeline.skeleton.resolve_airport_candidate", return_value=None),
+    ):
+        trip = build_skeleton(trip_data, gap_minutes=15, distance_meters=200)
+
+    event = trip.days[0].events[0]
+    assert event.name == "John Glenn Columbus International Airport"
+    assert event.geo_context["is_airport"] is True
+    assert event.geo_context["airport_name"] == "John Glenn Columbus International Airport"
+    assert event.name_candidates["Airport"] == "John Glenn Columbus International Airport"
+    assert "Brewdog" in event.name_candidates.values()
+
+
+def test_build_skeleton_does_not_promote_terminal_level_without_airport_name():
+    photos = [
+        _photo("2026-02-18 15:25:21", 39.99786388888889, -82.88245277777777),
+    ]
+    trip_data = {
+        "photos": photos,
+        "accommodations": [],
+        "transits": [],
+        "activities": [],
+        "expenses": [],
+        "google_maps": {"place_visits": [], "activity_segments": []},
+        "apple_health": [],
+        "dayone": [],
+    }
+    mock_geo = {
+        "city": "Columbus",
+        "country": "US",
+        "admin1": "Ohio",
+        "admin2": "Franklin County",
+        "suburb": "",
+        "municipality": "",
+        "tourism": "",
+        "aeroway": "Ticketing Level",
+        "amenity": "",
+        "leisure": "",
+        "historic": "",
+        "shop": "",
+        "natural": "",
+        "road": "",
+        "poi_name": "",
+        "area_name": "Columbus",
+        "place_name": "Columbus",
+        "overpass_poi_name": "Ticketing Level",
+        "overpass_pois": [
+            {
+                "name": "Ticketing Level",
+                "category": "aeroway",
+                "type": "terminal",
+                "distance_m": 73.0,
+            },
+            {
+                "name": "Brewdog",
+                "category": "amenity",
+                "type": "bar",
+                "distance_m": 14.0,
+            },
+        ],
+    }
+
+    with (
+        patch("post_trip_summary.pipeline.skeleton.reverse_geocode", return_value=mock_geo),
+        patch("post_trip_summary.pipeline.skeleton.resolve_airport_candidate", return_value=None),
+    ):
+        trip = build_skeleton(trip_data, gap_minutes=15, distance_meters=200)
+
+    event = trip.days[0].events[0]
+    assert event.name == "Columbus"
+    assert event.geo_context["is_airport"] is True
+    assert event.geo_context["airport_name"] == ""
+    assert "Ticketing Level" in event.name_candidates.values()
+
+
+def test_build_skeleton_uses_local_airport_resolver_for_terminal_only_geocode():
+    photos = [
+        _photo("2026-02-18 15:25:21", 39.99786388888889, -82.88245277777777),
+    ]
+    trip_data = {
+        "photos": photos,
+        "accommodations": [],
+        "transits": [],
+        "activities": [],
+        "expenses": [],
+        "google_maps": {"place_visits": [], "activity_segments": []},
+        "apple_health": [],
+        "dayone": [],
+    }
+    mock_geo = {
+        "city": "Columbus",
+        "country": "US",
+        "admin1": "Ohio",
+        "admin2": "Franklin County",
+        "suburb": "",
+        "municipality": "",
+        "tourism": "",
+        "aeroway": "Ticketing Level",
+        "amenity": "",
+        "leisure": "",
+        "historic": "",
+        "shop": "",
+        "natural": "",
+        "road": "",
+        "poi_name": "Ticketing Level",
+        "area_name": "Columbus",
+        "place_name": "Ticketing Level",
+        "overpass_poi_name": "Ticketing Level",
+        "overpass_pois": [
+            {
+                "name": "Ticketing Level",
+                "category": "aeroway",
+                "type": "terminal",
+                "distance_m": 73.0,
+            },
+            {
+                "name": "Brewdog",
+                "category": "amenity",
+                "type": "bar",
+                "distance_m": 14.0,
+            },
+        ],
+    }
+    airport_candidate = {
+        "name": "John Glenn Columbus International Airport",
+        "display_name": "John Glenn Columbus International Airport (CMH)",
+        "iata_code": "CMH",
+        "icao_code": "KCMH",
+        "type": "large_airport",
+        "distance_m": 740.0,
+        "source": "airport_seed",
+    }
+
+    with (
+        patch("post_trip_summary.pipeline.skeleton.reverse_geocode", return_value=mock_geo),
+        patch("post_trip_summary.pipeline.skeleton.resolve_airport_candidate", return_value=airport_candidate),
+    ):
+        trip = build_skeleton(trip_data, gap_minutes=15, distance_meters=200)
+
+    event = trip.days[0].events[0]
+    assert event.name == "John Glenn Columbus International Airport (CMH)"
+    assert event.name_candidates["Airport"] == "John Glenn Columbus International Airport (CMH)"
+    assert event.geo_context["airport_name"] == "John Glenn Columbus International Airport (CMH)"
+    assert event.geo_context["airport_iata"] == "CMH"
+
+
+def test_build_skeleton_prefers_area_for_broad_walking_cluster_with_minor_poi():
+    photos = [
+        _photo("2026-02-20 10:28:27", -36.849716666666666, 174.75965833333333),
+        _photo("2026-02-20 10:44:10", -36.84400277777778, 174.7633361111111),
+        _photo("2026-02-20 11:24:19", -36.84160555555556, 174.75904722222222),
+        _photo("2026-02-20 11:58:48", -36.84284166666667, 174.76634166666668),
+    ]
+    trip_data = {
+        "photos": photos,
+        "accommodations": [],
+        "transits": [],
+        "activities": [],
+        "expenses": [],
+        "google_maps": {"place_visits": [], "activity_segments": []},
+        "apple_health": [],
+        "dayone": [],
+    }
+    mock_geo = {
+        "city": "Auckland Central",
+        "country": "NZ",
+        "admin1": "Auckland Region",
+        "admin2": "Auckland",
+        "suburb": "",
+        "municipality": "",
+        "tourism": "Through Work We Will Live",
+        "amenity": "",
+        "leisure": "",
+        "historic": "",
+        "shop": "",
+        "natural": "",
+        "road": "",
+        "poi_name": "Through Work We Will Live",
+        "area_name": "Auckland Central",
+        "place_name": "Auckland Central",
+        "overpass_poi_name": "Through Work We Will Live",
+        "overpass_pois": [
+            {
+                "name": "Through Work We Will Live",
+                "category": "tourism",
+                "type": "artwork",
+                "distance_m": 121.0,
+            },
+            {
+                "name": "Long Modified Bench",
+                "category": "tourism",
+                "type": "artwork",
+                "distance_m": 124.0,
+            },
+            {
+                "name": "Horse trough",
+                "category": "historic",
+                "type": "memorial",
+                "distance_m": 104.0,
+            },
+        ],
+    }
+
+    with patch("post_trip_summary.pipeline.skeleton.reverse_geocode", return_value=mock_geo):
+        trip = build_skeleton(trip_data, gap_minutes=15, distance_meters=200)
+
+    event = trip.days[0].events[0]
+    assert event.name == "Auckland Central"
+    assert event.geo_context["is_broad_walking_cluster"] is True
+    assert event.name_candidates["Area"] == "Auckland Central"
+    assert "Through Work We Will Live" in event.name_candidates.values()

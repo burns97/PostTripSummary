@@ -39,6 +39,7 @@ class Event:
     notes: str = ""
     sources: list[str] = field(default_factory=list)
     name_candidates: dict[str, str] = field(default_factory=dict)
+    geo_context: dict[str, object] = field(default_factory=dict)
 
 
 @dataclass

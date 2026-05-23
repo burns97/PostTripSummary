@@ -948,17 +948,8 @@ def create_app(session: SessionConfig) -> FastAPI:
 def _generate_static_map(trip, output_dir) -> str | None:
     """Generate a static map image showing major stops. Returns relative path or None."""
     try:
-        from staticmap import StaticMap, CircleMarker
-        m = StaticMap(800, 400)
-        for day in trip.days:
-            for event in day.events:
-                if event.location.lat and event.location.lon:
-                    m.add_marker(CircleMarker((event.location.lon, event.location.lat), "#e74c3c", 8))
-        if m.markers:
-            map_path = output_dir / "route-map.png"
-            image = m.render()
-            image.save(str(map_path))
-            return "route-map.png"
+        from post_trip_summary.output.route_map import generate_static_route_map
+        return generate_static_route_map(trip, output_dir)
     except Exception:
         pass
     return None

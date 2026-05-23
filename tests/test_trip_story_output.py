@@ -32,10 +32,13 @@ def _event(
     photos: list[Photo],
     *,
     description: str = "A memorable stop.",
+    event_type: str = "landmark",
+    lat: float = 48.858,
+    lon: float = 2.294,
 ) -> Event:
     loc = Location(
-        lat=48.858,
-        lon=2.294,
+        lat=lat,
+        lon=lon,
         name=name,
         address=None,
         city=city,
@@ -43,7 +46,7 @@ def _event(
     )
     return Event(
         id=event_id,
-        type="landmark",
+        type=event_type,
         name=name,
         time_range=(datetime(2026, 3, 5, 10, 0), datetime(2026, 3, 5, 11, 0)),
         location=loc,
@@ -146,6 +149,56 @@ def test_location_summary_uses_ordered_unique_locations():
     from post_trip_summary.output.trip_story import build_location_summary
 
     assert build_location_summary(_trip()) == "Paris, France"
+
+
+def test_location_summary_ignores_transit_location_noise():
+    from post_trip_summary.output.trip_story import build_location_summary, compute_story_stats
+
+    trip = Trip(
+        name="New Zealand 2026",
+        date_range=(date(2026, 2, 18), date(2026, 3, 6)),
+        days=[
+            Day(
+                date=date(2026, 2, 18),
+                events=[
+                    _event(
+                        "day01-event01",
+                        "John Glenn Columbus International Airport",
+                        "Columbus",
+                        "US",
+                        [_photo("cmh", day=18)],
+                        event_type="transit",
+                        lat=39.9999,
+                        lon=-82.8872,
+                    ),
+                    _event(
+                        "day01-event02",
+                        "DFW to AKL",
+                        "Otu",
+                        "NG",
+                        [_photo("long-haul", day=18)],
+                        event_type="transit",
+                        lat=6.69,
+                        lon=4.90,
+                    ),
+                    _event(
+                        "day02-event01",
+                        "Auckland Central",
+                        "Auckland",
+                        "NZ",
+                        [_photo("auckland", day=19)],
+                        lat=-36.8485,
+                        lon=174.7633,
+                    ),
+                ],
+            )
+        ],
+    )
+
+    assert build_location_summary(trip) == "Auckland, NZ"
+    stats = compute_story_stats(trip)
+    assert stats["cities"] == 1
+    assert stats["countries"] == 1
 
 
 def test_select_highlight_photos_returns_kept_highlights_only():

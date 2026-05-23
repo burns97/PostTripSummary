@@ -33,6 +33,7 @@ def test_run_ingest_pipeline_with_progress(tmp_path):
         trip = run_ingest_pipeline(session, progress_callback=mock_callback)
 
     assert trip is not None
+    assert trip.name == session.name
     assert len(trip.days) > 0
     phases = {call[0] for call in progress_calls}
     assert "scanning" in phases

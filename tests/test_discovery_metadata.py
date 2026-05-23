@@ -260,12 +260,43 @@ def test_long_haul_flight_jumps_are_excluded_from_destination_movement():
     blend = discover_vacation_blend(trip)
 
     assert blend.diagnostics["gps_distance_km"] > 10000
+    assert blend.diagnostics["all_city_count"] == 6
+    assert blend.diagnostics["destination_city_count"] == 3
+    assert blend.diagnostics["city_count"] == 3
+    assert blend.diagnostics["all_country_count"] == 2
+    assert blend.diagnostics["country_count"] == 1
+    assert blend.diagnostics["travel_logistics_event_count"] == 3
     assert blend.diagnostics["long_haul_segment_count"] >= 1
     assert blend.diagnostics["long_haul_transit_km"] > 9000
     assert blend.diagnostics["destination_movement_km"] < blend.diagnostics["gps_distance_km"]
     assert "road_trip" in _primary_ids(blend)
     road_trip = next(score for score in blend.primary if score.theme_id == "road_trip")
     assert any("destination movement" in item.lower() for item in road_trip.evidence)
+
+
+def test_airport_only_long_haul_sample_does_not_create_road_trip_signal():
+    trip = _trip(
+        [
+            [
+                _event("airports-0", "Columbus airport departure", "Columbus", "United States", 39.99, -82.89, event_type="transit"),
+            ],
+            [
+                _event("airports-1", "Dallas airport layover", "Dallas", "United States", 32.90, -97.04, event_type="transit"),
+            ],
+            [
+                _event("airports-2", "Auckland airport arrival", "Auckland", "New Zealand", -36.85, 174.76, event_type="transit"),
+            ],
+        ]
+    )
+
+    blend = discover_vacation_blend(trip)
+
+    assert blend.diagnostics["destination_event_count"] == 0
+    assert blend.diagnostics["travel_logistics_event_count"] == 3
+    assert blend.diagnostics["destination_city_count"] == 0
+    assert blend.diagnostics["destination_movement_km"] == 0.0
+    assert blend.diagnostics["road_trip_eligible"] is False
+    assert "road_trip" not in _primary_ids(blend)
 
 
 def test_ordinary_lodging_and_restaurants_do_not_become_primary_themes():
@@ -362,6 +393,49 @@ def test_natural_landmarks_do_not_make_culture_primary_by_event_type_alone():
 
     assert "nature_wildlife" in _detected_ids(blend)
     assert "culture_sightseeing" not in _primary_ids(blend)
+
+
+def test_geo_context_poi_categories_contribute_theme_signal_and_diagnostics():
+    museum_stop = _event(
+        "geo-context-0",
+        "Afternoon stop",
+        "Rotorua",
+        "New Zealand",
+        -38.14,
+        176.25,
+    )
+    museum_stop.geo_context = {
+        "location_granularity": "nearby_poi",
+        "poi_category": "tourism",
+        "poi_type": "museum",
+        "place_name": "Rotorua Museum",
+        "poi_name": "",
+        "is_airport": False,
+        "nearby_pois": [
+            {
+                "name": "Rotorua Museum",
+                "category": "tourism",
+                "type": "museum",
+                "distance_m": 45.0,
+            }
+        ],
+    }
+    trip = _trip([[museum_stop]])
+
+    blend = discover_vacation_blend(trip)
+
+    assert "culture_sightseeing" in _detected_ids(blend)
+    geo_context = blend.diagnostics["geo_context"]
+    assert geo_context["events_with_geo_context"] == 1
+    assert geo_context["location_granularity_counts"]["nearby_poi"] == 1
+    assert geo_context["poi_category_counts"]["tourism"] == 1
+    assert geo_context["poi_type_counts"]["museum"] == 1
+    culture = next(
+        score
+        for score in blend.primary + blend.secondary
+        if score.theme_id == "culture_sightseeing"
+    )
+    assert any("geo context" in item.lower() for item in culture.evidence)
 
 
 def test_partial_trip_sample_adds_coverage_diagnostics_and_warning():
