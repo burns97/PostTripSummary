@@ -75,6 +75,124 @@ def test_generate_command_creates_trip_story(tmp_path):
     assert "Generating trip story" in result.output
 
 
+def test_preview_accepts_highlights_done_stage(tmp_path):
+    runner = CliRunner()
+    session = create_session("Paris 2026", base_dir=tmp_path)
+    session.current_stage = "highlights_done"
+    session.save()
+    save_trip(_final_trip(tmp_path), session.stage_file("highlights_done"))
+
+    with patch("post_trip_summary.preview.server.run_preview") as run_preview:
+        result = runner.invoke(cli, ["preview", "paris-2026", "--base-dir", str(tmp_path)])
+
+    assert result.exit_code == 0
+    run_preview.assert_called_once()
+
+
+def test_preview_uses_enriched_data_when_stale_final_file_exists(tmp_path):
+    runner = CliRunner()
+    session = create_session("Paris 2026", base_dir=tmp_path)
+    session.current_stage = "enriched"
+    session.save()
+    current_trip = _final_trip(tmp_path)
+    current_trip.name = "Current enriched"
+    stale_trip = _final_trip(tmp_path)
+    stale_trip.name = "Stale final"
+    save_trip(current_trip, session.stage_file("enriched"))
+    save_trip(stale_trip, session.stage_file("highlights_done"))
+
+    with patch("post_trip_summary.preview.server.run_preview") as run_preview:
+        result = runner.invoke(cli, ["preview", "paris-2026", "--base-dir", str(tmp_path)])
+
+    assert result.exit_code == 0
+    assert run_preview.call_args.args[0].name == "Current enriched"
+
+
+def test_generate_reports_current_highlights_stage_when_missing_data(tmp_path):
+    runner = CliRunner()
+    session = create_session("Paris 2026", base_dir=tmp_path)
+    session.current_stage = "enriched"
+    session.save()
+
+    result = runner.invoke(cli, ["generate", "paris-2026", "--base-dir", str(tmp_path)])
+
+    assert result.exit_code != 0
+    assert "No highlights_done data" in result.output
+
+
+def test_review_skeleton_accepts_ingested_stage(tmp_path):
+    runner = CliRunner()
+    session = create_session("Paris 2026", base_dir=tmp_path)
+    session.current_stage = "ingested"
+    session.save()
+    save_trip(_final_trip(tmp_path), session.stage_file("ingested"))
+
+    with patch("post_trip_summary.preview.server.run_preview") as run_preview:
+        result = runner.invoke(cli, ["review-skeleton", "paris-2026", "--base-dir", str(tmp_path)])
+
+    assert result.exit_code == 0
+    run_preview.assert_called_once()
+
+
+def test_review_skeleton_rejects_legacy_raw_ingest_stage(tmp_path):
+    runner = CliRunner()
+    session = create_session("Paris 2026", base_dir=tmp_path)
+    session.current_stage = "ingest"
+    session.save()
+
+    result = runner.invoke(cli, ["review-skeleton", "paris-2026", "--base-dir", str(tmp_path)])
+
+    assert result.exit_code != 0
+    assert "Review-skeleton requires ingested, reviewed stage" in result.output
+
+
+def test_cull_photos_accepts_reviewed_stage(tmp_path):
+    runner = CliRunner()
+    session = create_session("Paris 2026", base_dir=tmp_path)
+    session.current_stage = "reviewed"
+    session.save()
+    save_trip(_final_trip(tmp_path), session.stage_file("reviewed"))
+
+    with patch("post_trip_summary.preview.server.run_preview") as run_preview:
+        result = runner.invoke(cli, ["cull-photos", "paris-2026", "--base-dir", str(tmp_path)])
+
+    assert result.exit_code == 0
+    run_preview.assert_called_once()
+
+
+def test_pick_highlights_accepts_highlights_done_stage(tmp_path):
+    runner = CliRunner()
+    session = create_session("Paris 2026", base_dir=tmp_path)
+    session.current_stage = "highlights_done"
+    session.save()
+    save_trip(_final_trip(tmp_path), session.stage_file("highlights_done"))
+
+    with patch("post_trip_summary.preview.server.run_preview") as run_preview:
+        result = runner.invoke(cli, ["pick-highlights", "paris-2026", "--base-dir", str(tmp_path)])
+
+    assert result.exit_code == 0
+    run_preview.assert_called_once()
+
+
+def test_pick_highlights_uses_enriched_data_when_stale_final_file_exists(tmp_path):
+    runner = CliRunner()
+    session = create_session("Paris 2026", base_dir=tmp_path)
+    session.current_stage = "enriched"
+    session.save()
+    current_trip = _final_trip(tmp_path)
+    current_trip.name = "Current enriched"
+    stale_trip = _final_trip(tmp_path)
+    stale_trip.name = "Stale final"
+    save_trip(current_trip, session.stage_file("enriched"))
+    save_trip(stale_trip, session.stage_file("highlights_done"))
+
+    with patch("post_trip_summary.preview.server.run_preview") as run_preview:
+        result = runner.invoke(cli, ["pick-highlights", "paris-2026", "--base-dir", str(tmp_path)])
+
+    assert result.exit_code == 0
+    assert run_preview.call_args.args[0].name == "Current enriched"
+
+
 def test_discover_command_creates_vacation_blend(tmp_path):
     runner = CliRunner()
     session = create_session("Paris 2026", base_dir=tmp_path)

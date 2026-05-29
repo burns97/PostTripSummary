@@ -10,6 +10,48 @@ from post_trip_summary.config import (
 )
 
 
+LEGACY_TRIP_STAGE_ALIASES = {
+    "skeleton": "ingested",
+    "skeleton_reviewed": "reviewed",
+    "final": "highlights_done",
+}
+
+
+def _canonical_stage(stage: str, legacy_aliases: dict[str, str] | None = None) -> str:
+    aliases = legacy_aliases or LEGACY_TRIP_STAGE_ALIASES
+    return aliases.get(stage, stage)
+
+
+def _stage_label(stage: str, legacy_aliases: dict[str, str] | None = None) -> str:
+    canonical = _canonical_stage(stage, legacy_aliases=legacy_aliases)
+    if canonical == stage:
+        return stage
+    return f"{canonical} (legacy alias: {stage})"
+
+
+def _require_stage(
+    session,
+    allowed: set[str],
+    action: str,
+    legacy_aliases: dict[str, str] | None = None,
+) -> str:
+    canonical = _canonical_stage(session.current_stage, legacy_aliases=legacy_aliases)
+    if canonical not in allowed:
+        allowed_text = ", ".join(sorted(allowed))
+        click.echo(
+            f"{action} requires {allowed_text} stage "
+            f"(current: {_stage_label(session.current_stage, legacy_aliases=legacy_aliases)})."
+        )
+        raise SystemExit(1)
+    return canonical
+
+
+def _stage_file_for_current_session_stage(session, canonical_stage: str):
+    if session.current_stage in LEGACY_TRIP_STAGE_ALIASES:
+        return session.stage_file(session.current_stage)
+    return session.stage_file(canonical_stage)
+
+
 def _fmt_duration(seconds: float) -> str:
     """Format seconds as 'Xm Ys' or 'Ys' if under a minute."""
     if seconds < 60:
@@ -301,12 +343,15 @@ def preview(slug: str, port: int, base_dir: Path | None):
     """Preview trip outputs in browser."""
     base = base_dir or DEFAULT_BASE_DIR
     session = load_session(slug, base_dir=base)
-    stage = session.current_stage
-    if stage not in ("enriched", "final", "generated"):
-        click.echo(f"No data to preview yet (stage: {stage}). Run 'resume' first.")
+    stage = _canonical_stage(session.current_stage)
+    if stage not in ("enriched", "highlights_done", "generated"):
+        click.echo(f"No data to preview yet (stage: {_stage_label(session.current_stage)}). Run 'resume' first.")
         raise SystemExit(1)
     from post_trip_summary.serialization import load_trip
-    trip_file = session.stage_file("final") if session.stage_file("final").exists() else session.stage_file("enriched")
+    trip_file = session.stage_file("enriched" if stage == "enriched" else "highlights_done")
+    if not trip_file.exists():
+        click.echo(f"No {stage} data found. Run 'resume' first.")
+        raise SystemExit(1)
     trip = load_trip(trip_file)
     from post_trip_summary.preview.server import run_preview
     run_preview(trip, port=port)
@@ -444,9 +489,9 @@ def generate(slug: str, base_dir: Path | None):
     """Generate final output files."""
     base = base_dir or DEFAULT_BASE_DIR
     session = load_session(slug, base_dir=base)
-    final_file = session.stage_file("final")
+    final_file = session.stage_file("highlights_done")
     if not final_file.exists():
-        click.echo("No final data. Run 'resume' to complete the pipeline first.")
+        click.echo("No highlights_done data. Run 'resume' to complete the pipeline first.")
         raise SystemExit(1)
 
     from post_trip_summary.serialization import load_trip
@@ -494,19 +539,18 @@ def cull_photos(slug: str, port: int, base_dir: Path | None):
     """Visually review and cull photos in browser (after skeleton)."""
     base = base_dir or DEFAULT_BASE_DIR
     session = load_session(slug, base_dir=base)
-    if session.current_stage not in ("skeleton", "skeleton_reviewed"):
-        click.echo(f"Cull requires skeleton stage (current: {session.current_stage}).")
-        raise SystemExit(1)
+    _require_stage(session, {"ingested", "reviewed"}, "Cull")
 
     from post_trip_summary.serialization import load_trip, save_trip
-    stage = session.current_stage
-    trip = load_trip(session.stage_file(stage))
+    stage = _canonical_stage(session.current_stage)
+    trip_file = _stage_file_for_current_session_stage(session, stage)
+    trip = load_trip(trip_file)
 
     total = sum(len(e.photos) for d in trip.days for e in d.events)
     click.echo(f"Loaded {total} photos across {sum(len(d.events) for d in trip.days)} events.")
 
     def _save(t):
-        save_trip(t, session.stage_file(stage))
+        save_trip(t, trip_file)
 
     from post_trip_summary.preview.server import run_preview
     run_preview(trip, port=port, save_fn=_save, open_path="/review/cull")
@@ -520,19 +564,18 @@ def review_skeleton_cmd(slug: str, port: int, base_dir: Path | None):
     """Review and edit trip skeleton in browser (after skeleton build)."""
     base = base_dir or DEFAULT_BASE_DIR
     session = load_session(slug, base_dir=base)
-    if session.current_stage not in ("skeleton", "skeleton_reviewed"):
-        click.echo(f"Review-skeleton requires skeleton stage (current: {session.current_stage}).")
-        raise SystemExit(1)
+    _require_stage(session, {"ingested", "reviewed"}, "Review-skeleton")
 
     from post_trip_summary.serialization import load_trip, save_trip
-    stage = session.current_stage
-    trip = load_trip(session.stage_file(stage))
+    stage = _canonical_stage(session.current_stage)
+    trip_file = _stage_file_for_current_session_stage(session, stage)
+    trip = load_trip(trip_file)
 
     total_events = sum(len(d.events) for d in trip.days)
     click.echo(f"Loaded {total_events} events across {len(trip.days)} days.")
 
     def _save(t):
-        save_trip(t, session.stage_file(stage))
+        save_trip(t, trip_file)
 
     from post_trip_summary.preview.server import run_preview
     run_preview(trip, port=port, save_fn=_save, open_path="/review/skeleton")
@@ -546,23 +589,19 @@ def pick_highlights(slug: str, port: int, base_dir: Path | None):
     """Visually pick highlight photos in browser (after enrichment)."""
     base = base_dir or DEFAULT_BASE_DIR
     session = load_session(slug, base_dir=base)
-    if session.current_stage not in ("enriched", "final"):
-        click.echo(f"Pick-highlights requires enriched or final stage (current: {session.current_stage}).")
-        raise SystemExit(1)
+    _require_stage(session, {"enriched", "highlights_done"}, "Pick-highlights")
 
     from post_trip_summary.serialization import load_trip, save_trip
-    # Load from most recent available stage
-    if session.stage_file("final").exists():
-        trip = load_trip(session.stage_file("final"))
-    else:
-        trip = load_trip(session.stage_file("enriched"))
+    stage = _canonical_stage(session.current_stage)
+    trip_file = session.stage_file("enriched" if stage == "enriched" else "highlights_done")
+    trip = load_trip(trip_file)
 
     kept = sum(1 for d in trip.days for e in d.events for p in e.photos if p.is_kept)
     highlighted = sum(1 for d in trip.days for e in d.events for p in e.photos if p.is_kept and p.is_highlight)
     click.echo(f"Loaded {kept} kept photos ({highlighted} highlighted).")
 
     def _save(t):
-        save_trip(t, session.stage_file("final"))
+        save_trip(t, session.stage_file("highlights_done"))
 
     from post_trip_summary.preview.server import run_preview
     run_preview(trip, port=port, save_fn=_save, open_path="/review/highlights")
