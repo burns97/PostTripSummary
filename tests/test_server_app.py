@@ -854,6 +854,31 @@ def test_generate_api_trip_story(tmp_path):
     assert (session.output_dir / "trip-story.html").exists()
 
 
+def test_generate_api_trip_story_prepares_referenced_photos_when_photo_prep_unchecked(tmp_path):
+    session = create_session("test-trip", base_dir=tmp_path)
+    session.current_stage = "highlights_done"
+    session.save()
+    from post_trip_summary.server.app import create_app, _build_event_index
+
+    app = create_app(session)
+    app.state.trip = _make_test_trip(tmp_path)
+    app.state.event_index = _build_event_index(app.state.trip)
+    client = TestClient(app)
+
+    response = client.post("/api/generate", json={
+        "trip_story": True,
+        "detailed_record": False,
+        "shareable_pdf": False,
+        "blog_post": False,
+        "photo_prep": False,
+    })
+
+    assert response.status_code == 200
+    html = (session.output_dir / "trip-story.html").read_text(encoding="utf-8")
+    assert 'src="photos/photo.jpg"' in html
+    assert (session.output_dir / "photos" / "photo.jpg").exists()
+
+
 def test_preview_story_endpoint(tmp_path):
     session = create_session("test-trip", base_dir=tmp_path)
     session.current_stage = "highlights_done"

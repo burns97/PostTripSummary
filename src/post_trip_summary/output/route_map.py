@@ -10,7 +10,11 @@ def include_route_map_event(event: Event) -> bool:
     """Return whether an event should appear as a route-map stop."""
     if (event.type or "").lower() == "transit":
         return False
-    return event.location.lat is not None and event.location.lon is not None
+    lat = event.location.lat
+    lon = event.location.lon
+    if lat is None or lon is None:
+        return False
+    return not (lat == 0 and lon == 0)
 
 
 def route_map_events(trip: Trip) -> list[Event]:
