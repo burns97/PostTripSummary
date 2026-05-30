@@ -841,9 +841,12 @@ def create_app(session: SessionConfig) -> FastAPI:
         # Generate route map for story/PDF outputs
         map_image = _generate_static_map(trip, output_dir)
 
-        if body.get("photo_prep"):
+        should_prepare_photos = body.get("photo_prep") or body.get("trip_story")
+        if should_prepare_photos:
             from post_trip_summary.output.photo_prep import prepare_photos
             prepare_photos(trip, output_dir)
+
+        if body.get("photo_prep"):
             files.append({
                 "type": "photo_prep",
                 "path": str(output_dir / "photos"),

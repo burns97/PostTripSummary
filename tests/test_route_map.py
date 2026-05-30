@@ -116,3 +116,39 @@ def test_static_route_map_skips_transit_location_noise(tmp_path, monkeypatch, ma
 
     assert getattr(module, attr_name)(_trip_with_transit_noise(), tmp_path) == "route-map.png"
     assert added_markers == [(174.7633, -36.8485)]
+
+
+def test_route_map_events_skip_zero_zero_fallback_locations():
+    from post_trip_summary.output.route_map import route_map_events
+
+    trip = Trip(
+        name="Fallback GPS",
+        date_range=(date(2026, 2, 19), date(2026, 2, 19)),
+        days=[
+            Day(
+                date=date(2026, 2, 19),
+                events=[
+                    _event(
+                        "day01-event01",
+                        "No GPS Event",
+                        event_type="landmark",
+                        city="",
+                        country="",
+                        lat=0,
+                        lon=0,
+                    ),
+                    _event(
+                        "day01-event02",
+                        "Auckland Central",
+                        event_type="landmark",
+                        city="Auckland",
+                        country="NZ",
+                        lat=-36.8485,
+                        lon=174.7633,
+                    ),
+                ],
+            )
+        ],
+    )
+
+    assert [event.id for event in route_map_events(trip)] == ["day01-event02"]
