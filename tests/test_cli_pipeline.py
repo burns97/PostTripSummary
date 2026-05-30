@@ -232,3 +232,107 @@ def test_discover_command_reports_missing_session(tmp_path):
 
     assert result.exit_code != 0
     assert "Session 'missing-trip' not found" in result.output
+
+
+def test_local_prefill_updates_reviewed_trip(tmp_path):
+    runner = CliRunner()
+    session = create_session("Paris 2026", base_dir=tmp_path)
+    session.current_stage = "reviewed"
+    session.save()
+    trip = _final_trip(tmp_path)
+    trip.days[0].events[0].photos[0].ai_description = None
+    save_trip(trip, session.stage_file("reviewed"))
+
+    class Stats:
+        events_seen = 1
+        photos_attempted = 1
+        photos_described = 1
+        skipped_existing = 0
+        failed = 0
+        summaries_written = 1
+
+    def fake_prefill(loaded_trip, **kwargs):
+        loaded_trip.days[0].events[0].photos[0].ai_description = "Local draft."
+        return Stats()
+
+    with patch("post_trip_summary.pipeline.local_prefill.prefill_trip_with_local_descriptions", side_effect=fake_prefill):
+        result = runner.invoke(cli, ["local-prefill", "paris-2026", "--base-dir", str(tmp_path)])
+
+    assert result.exit_code == 0
+    assert "Local prefill complete" in result.output
+    from post_trip_summary.serialization import load_trip
+    saved = load_trip(session.stage_file("reviewed"))
+    assert saved.days[0].events[0].photos[0].ai_description == "Local draft."
+    assert load_session("paris-2026", base_dir=tmp_path).current_stage == "reviewed"
+
+
+def test_local_prefill_updates_enriched_trip(tmp_path):
+    runner = CliRunner()
+    session = create_session("Paris 2026", base_dir=tmp_path)
+    session.current_stage = "enriched"
+    session.save()
+    trip = _final_trip(tmp_path)
+    trip.days[0].events[0].photos[0].ai_description = None
+    save_trip(trip, session.stage_file("enriched"))
+
+    class Stats:
+        events_seen = 1
+        photos_attempted = 1
+        photos_described = 1
+        skipped_existing = 0
+        failed = 0
+        summaries_written = 1
+
+    def fake_prefill(loaded_trip, **kwargs):
+        loaded_trip.days[0].events[0].photos[0].ai_description = "Enriched local draft."
+        return Stats()
+
+    with patch("post_trip_summary.pipeline.local_prefill.prefill_trip_with_local_descriptions", side_effect=fake_prefill):
+        result = runner.invoke(cli, ["local-prefill", "paris-2026", "--base-dir", str(tmp_path)])
+
+    assert result.exit_code == 0
+    from post_trip_summary.serialization import load_trip
+    saved = load_trip(session.stage_file("enriched"))
+    assert saved.days[0].events[0].photos[0].ai_description == "Enriched local draft."
+
+
+def test_local_prefill_discovered_stage_invalidates_discovery(tmp_path):
+    runner = CliRunner()
+    session = create_session("Paris 2026", base_dir=tmp_path)
+    session.current_stage = "discovered"
+    session.save()
+    trip = _final_trip(tmp_path)
+    save_trip(trip, session.stage_file("reviewed"))
+    artifact = session.session_dir / "vacation_blend.json"
+    debug = session.session_dir / "vacation_blend_debug.md"
+    artifact.write_text("{}", encoding="utf-8")
+    debug.write_text("# stale", encoding="utf-8")
+
+    class Stats:
+        events_seen = 1
+        photos_attempted = 1
+        photos_described = 1
+        skipped_existing = 0
+        failed = 0
+        summaries_written = 1
+
+    with patch("post_trip_summary.pipeline.local_prefill.prefill_trip_with_local_descriptions", return_value=Stats()):
+        result = runner.invoke(cli, ["local-prefill", "paris-2026", "--base-dir", str(tmp_path)])
+
+    assert result.exit_code == 0
+    loaded = load_session("paris-2026", base_dir=tmp_path)
+    assert loaded.current_stage == "reviewed"
+    assert not artifact.exists()
+    assert not debug.exists()
+
+
+def test_local_prefill_rejects_missing_reviewed_or_enriched_data(tmp_path):
+    runner = CliRunner()
+    session = create_session("Paris 2026", base_dir=tmp_path)
+    session.current_stage = "ingested"
+    session.save()
+
+    result = runner.invoke(cli, ["local-prefill", "paris-2026", "--base-dir", str(tmp_path)])
+
+    assert result.exit_code != 0
+    assert "Local prefill requires reviewed, discovered, or enriched stage" in result.output
