@@ -90,7 +90,7 @@ post-trip-summary add-input iceland-2025 \
   --apple-health ~/Downloads/export.xml \
   --dayone ~/Downloads/DayOne.json
 
-# Run the pipeline (ingest → skeleton → review → discovery → enrich → review)
+# Open the wizard to run/resume the pipeline
 post-trip-summary resume iceland-2025
 
 # Optional: manually run Vacation Blend discovery after timeline review
@@ -105,33 +105,26 @@ post-trip-summary generate iceland-2025
 
 ## Pipeline stages
 
-The pipeline runs in stages, saving progress after each step so you can resume at any point:
+The wizard pipeline runs in stages, saving progress after each step. Use `post-trip-summary start <slug>` or the equivalent `post-trip-summary resume <slug>` to open the browser wizard at the current stage.
 
 | Stage | Description |
 |-------|-------------|
-| **Ingest** | Reads photos (EXIF/GPS), Excel itineraries, credit card CSVs, Google Maps timeline, Apple Health, and Day One journals. Scores photo quality and auto-culls the bottom percentile. |
-| **Skeleton** | Clusters events by time and location into a day-by-day trip structure, reverse geocodes centroids via Nominatim |
-| **Review skeleton** | Review and edit events in browser or CLI — merge, rename, delete, change type, add notes (browser UI opens by default) |
-| **Cull photos** | Optional browser-based photo review to remove unwanted shots before enrichment |
-| **Discovery** | Detects the Vacation Blend themes, such as Road Trip, Adventure, Food & Drink, or Beach & Relaxation, and lets you review/edit them before enrichment |
-| **Enrich** | Uses AI vision (Gemini or Claude) to describe photos and identify landmarks (with cost estimation and approval) |
-| **Pick highlights** | Optional browser-based selection of highlight photos for summary outputs |
-| **Review details** | Final interactive review of descriptions and details |
-| **Generate** | Produces the primary Trip Story plus optional detailed record, shareable PDF, blog post, photo prep, and route map |
+| `new` | Session created, inputs not configured yet. |
+| `setup` | Input paths and settings configured. |
+| `ingested` | Photos and supplementary inputs have been parsed into a draft timeline. |
+| `reviewed` | Timeline/events have been reviewed and edited. |
+| `discovered` | Vacation Blend themes have been detected and reviewed. |
+| `enriched` | AI vision enrichment has added event/photo descriptions. |
+| `highlights_done` | Highlight selection is complete; this is the final trip data used for preview and generation. |
+| `generated` | Output files have been written. |
 
-### Restarting from a stage
+### Resuming
 
-Use `--from` to jump back to an earlier stage without re-running everything before it:
+`resume` is an alias for `start`; it opens the browser wizard for the saved session stage:
 
 ```bash
-# Rebuild skeleton without re-ingesting (useful after changing clustering settings)
-post-trip-summary resume iceland-2025 --from skeleton
-
-# Re-run enrichment without rebuilding skeleton
-post-trip-summary resume iceland-2025 --from enriched
+post-trip-summary resume iceland-2025
 ```
-
-Valid values: `ingest`, `skeleton`, `skeleton_reviewed`, `enriched`.
 
 ## Browser-based review
 
@@ -145,8 +138,11 @@ Several pipeline stages offer browser-based UIs (powered by FastAPI + Jinja2) as
 These can also be launched standalone:
 
 ```bash
+# Works from ingested or reviewed stages
 post-trip-summary review-skeleton iceland-2025
 post-trip-summary cull-photos iceland-2025
+
+# Works from enriched or highlights_done stages
 post-trip-summary pick-highlights iceland-2025
 ```
 
@@ -173,8 +169,8 @@ post-trip-summary pick-highlights iceland-2025
 post-trip-summary new <name>              Create a new trip session
 post-trip-summary list                    List all sessions
 post-trip-summary add-input <slug> ...    Add data sources to a session
-post-trip-summary resume <slug>           Resume pipeline from last stage
-post-trip-summary resume <slug> --from <stage>  Restart from a specific stage
+post-trip-summary start <slug>            Open the browser wizard
+post-trip-summary resume <slug>           Alias for start
 post-trip-summary discover <slug>         Run Vacation Blend discovery after timeline review
 post-trip-summary preview <slug>          Preview trip in browser (FastAPI)
 post-trip-summary generate <slug>         Generate final output files
