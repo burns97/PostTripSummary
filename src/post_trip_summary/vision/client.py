@@ -119,12 +119,26 @@ class ClaudeProvider(VisionProvider):
 VisionClient = ClaudeProvider
 
 
-def create_provider(name: str = "gemini", api_key: str | None = None, model: str | None = None, billing: bool = False) -> VisionProvider:
+def create_provider(
+    name: str = "gemini",
+    api_key: str | None = None,
+    model: str | None = None,
+    billing: bool = False,
+    base_url: str | None = None,
+    timeout_seconds: int | None = None,
+) -> VisionProvider:
     """Factory -- returns the appropriate provider instance."""
     if name == "claude":
         return ClaudeProvider(api_key=api_key, model=model or "claude-sonnet-4-20250514")
     elif name == "gemini":
         from post_trip_summary.vision.gemini import GeminiProvider
         return GeminiProvider(api_key=api_key, model=model or "gemini-2.5-flash", billing=billing)
+    elif name == "ollama":
+        from post_trip_summary.vision.ollama import OllamaProvider
+        return OllamaProvider(
+            model=model or "gemma4:e2b",
+            base_url=base_url or "http://localhost:11434",
+            timeout_seconds=timeout_seconds or 120,
+        )
     else:
-        raise ValueError(f"Unknown vision provider: {name}. Options: claude, gemini")
+        raise ValueError(f"Unknown vision provider: {name}. Options: claude, gemini, ollama")

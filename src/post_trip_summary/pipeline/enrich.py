@@ -46,7 +46,8 @@ def enrich_trip(trip: Trip, auto_approve: bool = False) -> Trip:
     """Run vision analysis on representative photos and update events."""
     # Load vision settings and validate before creating provider
     vs = get_vision_settings()
-    if not vs.get("api_key"):
+    requires_api_key = vs.get("requires_api_key", True)
+    if requires_api_key and not vs.get("api_key"):
         provider_name = vs["provider"]
         if provider_name == "gemini":
             env_hint = "GOOGLE_API_KEY"
@@ -60,7 +61,14 @@ def enrich_trip(trip: Trip, auto_approve: bool = False) -> Trip:
             _select_highlights(event.photos)
         return trip
 
-    provider = create_provider(vs["provider"], api_key=vs.get("api_key"), model=vs.get("model"), billing=vs.get("billing", False))
+    provider = create_provider(
+        vs["provider"],
+        api_key=vs.get("api_key"),
+        model=vs.get("model"),
+        billing=vs.get("billing", False),
+        base_url=vs.get("base_url"),
+        timeout_seconds=vs.get("timeout_seconds"),
+    )
 
     # Collect all events with photos
     all_events = [event for day in trip.days for event in day.events if event.photos]
@@ -458,14 +466,22 @@ def enrich_trip_headless(
 
     # Create vision provider
     vs = get_vision_settings()
-    if not vs.get("api_key"):
+    requires_api_key = vs.get("requires_api_key", True)
+    if requires_api_key and not vs.get("api_key"):
         # No API key -- just select highlights
         for event in all_events:
             _select_highlights(event.photos)
         _progress("done", 0, 0, "No API key; highlights selected only")
         return trip
 
-    provider = create_provider(vs["provider"], api_key=vs.get("api_key"), model=vs.get("model"), billing=vs.get("billing", False))
+    provider = create_provider(
+        vs["provider"],
+        api_key=vs.get("api_key"),
+        model=vs.get("model"),
+        billing=vs.get("billing", False),
+        base_url=vs.get("base_url"),
+        timeout_seconds=vs.get("timeout_seconds"),
+    )
 
     from post_trip_summary.vision.gemini import QuotaExhaustedError
     from post_trip_summary.vision.montage import build_montage
@@ -586,10 +602,18 @@ def synthesize_event_descriptions(trip: Trip, progress_callback=None) -> Trip:
     cohesive 2-4 sentence event summary.
     """
     vs = get_vision_settings()
-    if not vs.get("api_key"):
+    requires_api_key = vs.get("requires_api_key", True)
+    if requires_api_key and not vs.get("api_key"):
         return trip
 
-    provider = create_provider(vs["provider"], api_key=vs.get("api_key"), model=vs.get("model"), billing=vs.get("billing", False))
+    provider = create_provider(
+        vs["provider"],
+        api_key=vs.get("api_key"),
+        model=vs.get("model"),
+        billing=vs.get("billing", False),
+        base_url=vs.get("base_url"),
+        timeout_seconds=vs.get("timeout_seconds"),
+    )
     from post_trip_summary.vision.prompts import build_context, get_prompt
 
     all_events = [event for day in trip.days for event in day.events if event.photos]

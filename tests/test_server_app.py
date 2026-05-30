@@ -605,6 +605,32 @@ def test_enrich_estimate_endpoint(tmp_path):
     assert "event_count" in data
 
 
+def test_enrich_estimate_ollama_is_available_without_api_key(tmp_path):
+    session = create_session("test-trip", base_dir=tmp_path)
+    session.current_stage = "reviewed"
+    session.save()
+    from post_trip_summary.server.app import create_app, _build_event_index
+    app = create_app(session)
+    app.state.trip = _make_test_trip(tmp_path)
+    app.state.event_index = _build_event_index(app.state.trip)
+    client = TestClient(app)
+
+    with patch("post_trip_summary.server.app.get_vision_settings",
+               return_value={
+                   "provider": "ollama",
+                   "api_key": None,
+                   "model": "gemma4:e2b",
+                   "billing": False,
+                   "requires_api_key": False,
+               }):
+        response = client.get("/api/enrich/estimate")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["provider"] == "ollama"
+    assert data["has_api_key"] is True
+
+
 def test_enrich_page_redirects_reviewed_session_to_discovery(tmp_path):
     session = create_session("test-trip", base_dir=tmp_path)
     session.current_stage = "reviewed"

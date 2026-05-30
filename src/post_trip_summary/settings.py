@@ -23,6 +23,9 @@ DEFAULT_SETTINGS = {
         "gemini_billing": False,
         "claude_api_key": "",
         "claude_model": "claude-sonnet-4-20250514",
+        "ollama_model": "gemma4:e2b",
+        "ollama_base_url": "http://localhost:11434",
+        "ollama_timeout_seconds": 120,
     },
     "geocoding": {
         "locationiq_api_key": "",
@@ -35,7 +38,7 @@ DEFAULT_SETTINGS = {
 
 _DEFAULT_TOML = """\
 [vision]
-# Vision provider: "gemini" or "claude"
+# Vision provider: "gemini", "claude", or "ollama"
 provider = "gemini"
 
 # Gemini settings (or set GOOGLE_API_KEY env var)
@@ -49,6 +52,11 @@ gemini_billing = false
 # Claude settings (or set ANTHROPIC_API_KEY env var)
 claude_api_key = ""
 claude_model = "claude-sonnet-4-20250514"
+
+# Ollama settings (experimental local provider; no API key required)
+ollama_model = "gemma4:e2b"
+ollama_base_url = "http://localhost:11434"
+ollama_timeout_seconds = 120
 
 [geocoding]
 # LocationIQ API key for faster geocoding (or set LOCATIONIQ_API_KEY env var)
@@ -129,6 +137,8 @@ def get_vision_settings(settings_file: Path | None = None) -> dict:
     provider = vision["provider"]
 
     billing = False
+    requires_api_key = True
+    extra: dict[str, object] = {}
     if provider == "gemini":
         api_key = vision.get("gemini_api_key", "") or os.environ.get("GOOGLE_API_KEY", "")
         model = vision.get("gemini_model", "gemini-2.0-flash")
@@ -137,14 +147,25 @@ def get_vision_settings(settings_file: Path | None = None) -> dict:
         api_key = vision.get("claude_api_key", "") or os.environ.get("ANTHROPIC_API_KEY", "")
         model = vision.get("claude_model", "claude-sonnet-4-20250514")
         billing = True  # Claude always has costs
+    elif provider == "ollama":
+        api_key = ""
+        model = os.environ.get("OLLAMA_MODEL", "") or vision.get("ollama_model", "gemma4:e2b")
+        billing = False
+        requires_api_key = False
+        extra = {
+            "base_url": os.environ.get("OLLAMA_BASE_URL", "") or vision.get("ollama_base_url", "http://localhost:11434"),
+            "timeout_seconds": vision.get("ollama_timeout_seconds", 120),
+        }
     else:
-        raise ValueError(f"Unknown vision provider: {provider}. Options: gemini, claude")
+        raise ValueError(f"Unknown vision provider: {provider}. Options: gemini, claude, ollama")
 
     return {
         "provider": provider,
         "api_key": api_key or None,
         "model": model,
         "billing": billing,
+        "requires_api_key": requires_api_key,
+        **extra,
     }
 
 

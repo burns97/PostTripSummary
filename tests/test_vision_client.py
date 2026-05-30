@@ -62,6 +62,19 @@ def test_create_provider_gemini():
         assert isinstance(provider, VisionProvider)
 
 
+def test_create_provider_ollama():
+    """Factory returns OllamaProvider for 'ollama'."""
+    provider = create_provider(
+        "ollama",
+        model="gemma4:e2b",
+        base_url="http://localhost:11434",
+        timeout_seconds=45,
+    )
+    from post_trip_summary.vision.ollama import OllamaProvider
+    assert isinstance(provider, OllamaProvider)
+    assert isinstance(provider, VisionProvider)
+
+
 def test_create_provider_unknown():
     """Factory raises ValueError for unknown provider."""
     try:
@@ -69,6 +82,7 @@ def test_create_provider_unknown():
         assert False, "Should have raised ValueError"
     except ValueError as e:
         assert "Unknown vision provider" in str(e)
+        assert "ollama" in str(e)
 
 
 def test_gemini_analyze_montage_mock(monkeypatch):
