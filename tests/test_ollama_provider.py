@@ -1,7 +1,9 @@
 import base64
+from io import BytesIO
 import json
 
 import pytest
+from PIL import Image
 
 from post_trip_summary.vision.client import VisionResult
 
@@ -51,6 +53,22 @@ def test_ollama_analyze_posts_image_and_parses_json_result():
     assert payload["stream"] is False
     assert payload["format"] == "json"
     assert payload["images"] == [base64.b64encode(b"fake-image").decode("ascii")]
+
+
+def test_ollama_analyze_converts_tiff_to_jpeg_before_posting():
+    from post_trip_summary.vision.ollama import OllamaProvider
+
+    source = BytesIO()
+    Image.new("RGB", (4, 4), color="red").save(source, format="TIFF")
+    transport = FakeTransport(response={"response": '{"description": "A red square."}'})
+    provider = OllamaProvider(transport=transport)
+
+    result = provider.analyze(source.getvalue(), media_type="image/tiff", purpose="scene")
+
+    assert result.description == "A red square."
+    _, payload, _ = transport.calls[0]
+    converted = base64.b64decode(payload["images"][0])
+    assert Image.open(BytesIO(converted)).format == "JPEG"
 
 
 def test_ollama_analyze_uses_plain_text_when_model_does_not_return_json():

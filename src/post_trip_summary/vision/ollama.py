@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import base64
+from io import BytesIO
 import json
 from typing import Callable
 from urllib import error, request
@@ -41,6 +42,7 @@ class OllamaProvider(VisionProvider):
         from post_trip_summary.vision.prompts import get_prompt
 
         prompt = get_prompt(purpose, context=context)
+        image_data = _normalize_image_for_ollama(image_data, media_type)
         text = self._generate(prompt, image_data=image_data)
         data = _parse_json_object(text)
         if data is None:
@@ -65,6 +67,7 @@ class OllamaProvider(VisionProvider):
         from post_trip_summary.vision.prompts import get_prompt
 
         prompt = get_prompt(purpose, context=context, image_count=image_count, **prompt_kwargs)
+        image_data = _normalize_image_for_ollama(image_data, media_type)
         text = self._generate(prompt, image_data=image_data)
         data = _parse_json_object(text)
         if data is None:
@@ -102,6 +105,10 @@ class OllamaProvider(VisionProvider):
 
         try:
             data = self._transport(f"{self._base_url}/api/generate", payload, self._timeout_seconds)
+        except OllamaProviderError as exc:
+            raise OllamaProviderError(
+                f"Ollama request failed at {self._base_url}: {exc}"
+            ) from exc
         except Exception as exc:
             raise OllamaProviderError(
                 f"Could not reach Ollama at {self._base_url}. "
@@ -125,6 +132,36 @@ class OllamaProvider(VisionProvider):
                 return json.loads(resp.read().decode("utf-8"))
         except (error.URLError, TimeoutError, json.JSONDecodeError, OSError) as exc:
             raise OllamaProviderError(f"Ollama request failed: {exc}") from exc
+
+
+def _normalize_image_for_ollama(image_data: bytes, media_type: str) -> bytes:
+    """Convert formats Ollama may not decode, such as HEIC/TIFF, to JPEG."""
+    normalized_media_type = media_type.lower()
+    if normalized_media_type in ("image/jpeg", "image/jpg", "image/png"):
+        return image_data
+
+    if normalized_media_type in ("image/heic", "image/heif"):
+        try:
+            import pillow_heif
+            pillow_heif.register_heif_opener()
+        except ImportError as exc:
+            raise OllamaProviderError(
+                "Ollama cannot decode HEIC/HEIF directly and pillow-heif is not installed."
+            ) from exc
+
+    try:
+        from PIL import Image
+
+        with Image.open(BytesIO(image_data)) as img:
+            output = BytesIO()
+            if img.mode != "RGB":
+                img = img.convert("RGB")
+            img.save(output, format="JPEG", quality=90)
+            return output.getvalue()
+    except Exception as exc:
+        raise OllamaProviderError(
+            f"Ollama cannot decode {media_type} directly and conversion to JPEG failed."
+        ) from exc
 
 
 def _parse_json_object(text: str) -> dict | None:
