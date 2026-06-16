@@ -407,6 +407,62 @@ def discover(slug: str, base_dir: Path | None):
     click.echo(f"Debug report: {debug_report_path}")
 
 
+@cli.command("local-prefill")
+@click.argument("slug")
+@click.option("--max-photos-per-event", default=2, show_default=True, help="Representative kept photos to describe per event.")
+@click.option("--overwrite", is_flag=True, help="Replace existing local or cloud descriptions.")
+@click.option("--base-dir", type=click.Path(path_type=Path), default=None, hidden=True)
+def local_prefill(slug: str, max_photos_per_event: int, overwrite: bool, base_dir: Path | None):
+    """Draft photo descriptions with the configured local Ollama model."""
+    base = base_dir or DEFAULT_BASE_DIR
+    session = load_session(slug, base_dir=base)
+    stage = _canonical_stage(session.current_stage)
+
+    if stage in ("reviewed", "discovered"):
+        trip_stage = "reviewed"
+    elif stage == "enriched":
+        trip_stage = "enriched"
+    else:
+        click.echo("Local prefill requires reviewed, discovered, or enriched stage.")
+        raise SystemExit(1)
+
+    trip_file = session.stage_file(trip_stage)
+    if not trip_file.exists():
+        click.echo(f"No {trip_stage} trip data found.")
+        raise SystemExit(1)
+
+    from post_trip_summary.pipeline.local_prefill import prefill_trip_with_local_descriptions
+    from post_trip_summary.serialization import load_trip, save_trip
+
+    trip = load_trip(trip_file)
+    stats = prefill_trip_with_local_descriptions(
+        trip,
+        max_photos_per_event=max_photos_per_event,
+        overwrite=overwrite,
+    )
+    save_trip(trip, trip_file)
+    if stage == "discovered":
+        from post_trip_summary.discovery.debug_report import vacation_blend_debug_report_path
+        from post_trip_summary.discovery.serialization import vacation_blend_path
+
+        for path in (
+            vacation_blend_path(session.session_dir),
+            vacation_blend_debug_report_path(session.session_dir),
+        ):
+            if path.exists():
+                path.unlink()
+        session.current_stage = "reviewed"
+        session.save()
+
+    click.echo("Local prefill complete")
+    click.echo(f"Events checked: {stats.events_seen}")
+    click.echo(f"Photos attempted: {stats.photos_attempted}")
+    click.echo(f"Photos described: {stats.photos_described}")
+    click.echo(f"Skipped existing: {stats.skipped_existing}")
+    click.echo(f"Failures: {stats.failed}")
+    click.echo(f"Summaries written: {stats.summaries_written}")
+
+
 @cli.command("geocode-audit")
 @click.argument("slug")
 @click.option(

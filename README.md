@@ -76,6 +76,14 @@ ollama_timeout_seconds = 120
 
 Ollama calls have no metered API cost, but they can be slow on CPU-only laptops. This provider is intended for experimental local drafts and cost-saving workflows; Gemini remains the higher-quality default.
 
+To front-load draft descriptions before cloud enrichment, run local prefill after timeline review:
+
+```bash
+post-trip-summary local-prefill iceland-2025 --max-photos-per-event 2
+```
+
+This samples a small number of kept photos per event, writes draft `ai_description` values, and saves back to the reviewed or enriched trip file without advancing the session stage. Use `--overwrite` only when you want to replace existing descriptions.
+
 #### Settings file
 
 Global settings live at `~/.post-trip-summary/settings.toml`. Run `post-trip-summary config` to view or edit. The file is auto-created on first use with these defaults:
