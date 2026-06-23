@@ -48,6 +48,27 @@ class TestQuickMode:
 
     @patch("post_trip_summary.pipeline.enrich.create_provider")
     @patch("post_trip_summary.pipeline.enrich.get_vision_settings")
+    def test_headless_ollama_does_not_require_api_key(self, mock_settings, mock_create, tmp_path):
+        from post_trip_summary.pipeline.enrich import enrich_trip_headless
+        mock_settings.return_value = {
+            "provider": "ollama",
+            "api_key": None,
+            "model": "gemma4:e2b",
+            "billing": False,
+            "requires_api_key": False,
+        }
+        mock_provider = MagicMock()
+        mock_provider.analyze_montage.return_value = {"summary": "Locally described event.", "highlights": [1, 2]}
+        mock_create.return_value = mock_provider
+        trip = _trip_with_event(tmp_path, photo_count=5)
+
+        result = enrich_trip_headless(trip, mode="quick")
+
+        mock_provider.analyze_montage.assert_called_once()
+        assert result.days[0].events[0].summary == "Locally described event."
+
+    @patch("post_trip_summary.pipeline.enrich.create_provider")
+    @patch("post_trip_summary.pipeline.enrich.get_vision_settings")
     def test_highlights_from_montage_picks(self, mock_settings, mock_create, tmp_path):
         from post_trip_summary.pipeline.enrich import enrich_trip_headless
         mock_settings.return_value = {"provider": "gemini", "api_key": "fake", "model": "gemini-2.5-flash"}

@@ -130,3 +130,28 @@ def test_synthesis_failure_keeps_original_description():
 
     # Pass-1 description should be preserved
     assert enriched.days[0].events[0].description == "A view of the tower"
+
+
+def test_enrich_ollama_does_not_require_api_key():
+    """Local Ollama enrichment should run even though there is no API key."""
+    event = _event("Unknown Place", sources=["exif"], num_photos=1)
+    trip = _trip_with_event(event)
+
+    mock_provider = MagicMock()
+    mock_provider.analyze.return_value = VisionResult(description="Local model description.", confidence="medium")
+    mock_provider.estimate_cost.return_value = 0.0
+
+    with patch("post_trip_summary.pipeline.enrich.get_vision_settings",
+               return_value={
+                   "provider": "ollama",
+                   "api_key": None,
+                   "model": "gemma4:e2b",
+                   "billing": False,
+                   "requires_api_key": False,
+               }), \
+         patch("post_trip_summary.pipeline.enrich.create_provider", return_value=mock_provider), \
+         patch("post_trip_summary.pipeline.enrich._read_image", return_value=(b"fakedata", "image/jpeg")):
+        enriched = enrich_trip(trip, auto_approve=True)
+
+    mock_provider.analyze.assert_called_once()
+    assert enriched.days[0].events[0].description == "Local model description."

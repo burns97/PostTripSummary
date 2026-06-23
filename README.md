@@ -25,7 +25,7 @@ pip install -e .
 
 ### Vision provider setup
 
-The enrichment stage uses an AI vision API to describe photos and identify landmarks. Two providers are supported: **Google Gemini** (default, free tier) and **Claude** (paid).
+The enrichment stage uses an AI vision provider to describe photos and identify landmarks. Three providers are supported: **Google Gemini** (default, free tier), **Claude** (paid), and **Ollama** (experimental local models).
 
 #### Google Gemini (default)
 
@@ -56,19 +56,43 @@ $env:ANTHROPIC_API_KEY = "sk-ant-..."
 
 Then switch the provider in settings (see below).
 
+#### Ollama (experimental local provider)
+
+Install [Ollama](https://ollama.com/), pull a multimodal model, and make sure Ollama is running locally:
+
+```bash
+ollama run gemma4:e2b
+```
+
+Then configure the local provider in `~/.post-trip-summary/settings.toml`:
+
+```toml
+[vision]
+provider = "ollama"
+ollama_model = "gemma4:e2b"
+ollama_base_url = "http://localhost:11434"
+ollama_timeout_seconds = 120
+```
+
+Ollama calls have no metered API cost, but they can be slow on CPU-only laptops. This provider is intended for experimental local drafts and cost-saving workflows; Gemini remains the higher-quality default.
+
 #### Settings file
 
 Global settings live at `~/.post-trip-summary/settings.toml`. Run `post-trip-summary config` to view or edit. The file is auto-created on first use with these defaults:
 
 ```toml
 [vision]
-provider = "gemini"           # "gemini" or "claude"
+provider = "gemini"           # "gemini", "claude", or "ollama"
 
 gemini_api_key = ""           # or set GOOGLE_API_KEY env var
 gemini_model = "gemini-2.0-flash"
 
 claude_api_key = ""           # or set ANTHROPIC_API_KEY env var
 claude_model = "claude-sonnet-4-20250514"
+
+ollama_model = "gemma4:e2b"
+ollama_base_url = "http://localhost:11434"
+ollama_timeout_seconds = 120
 ```
 
 API keys can be set either in this file or via environment variables. Environment variables are used as a fallback when the settings file value is empty.

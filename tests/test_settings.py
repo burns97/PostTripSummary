@@ -74,9 +74,34 @@ def test_get_vision_settings(tmp_path):
     path = tmp_path / "settings.toml"
     save_settings(DEFAULT_SETTINGS, path)
     vs = get_vision_settings(path)
-    assert set(vs.keys()) == {"provider", "api_key", "model", "billing"}
+    assert set(vs.keys()) == {"provider", "api_key", "model", "billing", "requires_api_key"}
     assert vs["provider"] == "gemini"
     assert vs["model"] == "gemini-2.5-flash"
+    assert vs["requires_api_key"] is True
+
+
+def test_get_vision_settings_ollama(tmp_path):
+    """Ollama is a local provider and does not require an API key."""
+    path = tmp_path / "settings.toml"
+    settings = dict(DEFAULT_SETTINGS)
+    settings["vision"] = dict(settings["vision"])
+    settings["vision"]["provider"] = "ollama"
+    settings["vision"]["ollama_model"] = "gemma4:e2b"
+    settings["vision"]["ollama_base_url"] = "http://localhost:11434"
+    settings["vision"]["ollama_timeout_seconds"] = 45
+    save_settings(settings, path)
+
+    vs = get_vision_settings(path)
+
+    assert vs == {
+        "provider": "ollama",
+        "api_key": None,
+        "model": "gemma4:e2b",
+        "billing": False,
+        "requires_api_key": False,
+        "base_url": "http://localhost:11434",
+        "timeout_seconds": 45,
+    }
 
 
 def test_ensure_settings_file_creates(tmp_path):

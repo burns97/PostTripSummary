@@ -152,7 +152,7 @@ def create_app(session: SessionConfig) -> FastAPI:
         ctx["vision_provider"] = app.state.session.settings.get(
             "vision_provider", vs.get("provider", "gemini")
         )
-        ctx["api_key_set"] = bool(vs.get("api_key"))
+        ctx["api_key_set"] = bool(vs.get("api_key")) or not vs.get("requires_api_key", True)
         template = env.get_template("setup.html")
         return HTMLResponse(template.render(**ctx))
 
@@ -261,7 +261,7 @@ def create_app(session: SessionConfig) -> FastAPI:
             "estimated_cost": quick_cost,
             "thorough_cost": thorough_cost,
             "billing": billing,
-            "has_api_key": bool(vs.get("api_key")),
+            "has_api_key": bool(vs.get("api_key")) or not vs.get("requires_api_key", True),
             "event_count": len(all_events),
         })
 
